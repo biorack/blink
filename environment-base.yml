@@ -1,0 +1,9 @@
+name: blink
+channels:
+  - bioconda
+dependencies:
+  - python=3
+  - numpy
+  - scipy
+  - pandas
+  - pyteomics
