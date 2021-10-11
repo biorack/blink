@@ -27,7 +27,7 @@ def discretize_spectra(mzis, bin_width=.001, intensity_power=.5):
     s = sp.coo_matrix((mzis[1], (spec_ids, mz_bin_idxs)), (spec_ids[-1]+1, num_bins))
     s = s.multiply(1./norm(s, axis=1)[:,None]).tocsr()
     c = sp.coo_matrix((np.ones_like(mzis[1]), (spec_ids, mz_bin_idxs)), (spec_ids[-1]+1, num_bins))
-    c = c.multiply(((c.getnnz(axis=1)**.5)/sp.linalg.norm(c, axis=1))[:,None]).tocsr()
+    c = c.multiply(((c.getnnz(axis=1)**.5)/norm(c, axis=1))[:,None]).tocsr()
 
     return s,c
 
