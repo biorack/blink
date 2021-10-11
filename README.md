@@ -24,8 +24,12 @@ conda env create -f environment-base.yml
 blink.py -d file.mgf
 
 # Compute all-by-all cosine scores and # matching ions for each
-# fragmentation mass spectrum (glob used to ignore metadata)
-blink.py -s file*.npz
+# fragmentation mass spectrum (use glob to ignore metadata)
+blink.py -s file_sparse.npz
+
+# Compute A-vs-B cosine scores and # matching ions for each
+# fragmentation mass spectrum (use glob to ignore metadata)
+blink.py -s experiment_file_sparse.npz library_file_sparse.npz
 ```
 
 ## Contributing
