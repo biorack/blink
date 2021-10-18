@@ -1,0 +1,16 @@
+name: blink-example
+channels:
+  - rdkit
+  - bioconda
+  - defaults
+dependencies:
+  - python=3
+  - numpy
+  - pandas
+  - scipy
+  - seaborn
+  - jupyter
+  - matplotlib
+  - rdkit
+  - matchms
+  - networkx

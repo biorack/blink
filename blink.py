@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 import sys
 import os
@@ -116,8 +116,8 @@ def arg_parser(parser=None):
                       help='remove empty spectra from CSR matrix file(s)')
     mode.add_argument('-s', '--score', nargs='+', action=required_length(1,2), required=False,
                       help='score CSR matrix file with itself or another')
-    mode.add_argument('-b', '--benchmark', nargs='+', required=False,
-                      help='benchmark BLINK performance vs MatchMS')
+    # mode.add_argument('-b', '--benchmark', nargs='+', required=False,
+    #                   help='benchmark BLINK performance vs MatchMS')
 
     #Compute options
     compute_options = parser.add_argument_group()
