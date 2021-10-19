@@ -200,9 +200,9 @@ def main():
 
     logging.basicConfig(filename=os.path.join(os.getcwd(),'blink.log'), level=logging.INFO)
 
-    common_ext = os.path.splitext(os.path.commonprefix([os.path.basename(in_file)[::-1]
-                                                        for input in args.files
-                                                        for in_file in glob.glob(input)])[::-1])[1]
+    common_ext = {os.path.splitext(in_file)[1] for f in args.files for in_file in glob.glob(f)}
+    if len(common_ext) == 1:
+        common_ext = list(common_ext)[0]
 
     if common_ext == '.mgf':
         logging.info('Discretize Start')
@@ -260,7 +260,7 @@ def main():
     elif common_ext == '.npz':
         logging.info('Score Start')
 
-        out_name = '_'.join([os.path.splitext(os.path.splitext(os.path.basename(args.files[0]))[0])[0] for f in args.files])
+        out_name = '_'.join([os.path.splitext(os.path.splitext(os.path.basename(f))[0])[0] for f in args.files])
 
         if args.out_dir:
             out_dir = args.out_dir
@@ -292,7 +292,7 @@ def main():
             except AssertionError:
                 log.error('Input files have differing bin_width')
                 sys.exit(1)
-            S2 = expand_sparse_spectra(**S)
+            S2 = expand_sparse_spectra(**S2)
 
         N = network_kernel(S1['mzi'].shape[1], S2['mzi'].shape[1],
                            args.mass_diffs, react_dist=args.react_dist,
