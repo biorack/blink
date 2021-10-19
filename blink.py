@@ -43,7 +43,7 @@ def discretize_spectra(mzis, pmzs=None, bin_width=.001, intensity_power=.5, expa
           'intensity_power': intensity_power}
 
     if expand:
-        S = expand_sparse_spectra(S)
+        S = expand_sparse_spectra(**S)
 
     return S
 
