@@ -16,20 +16,47 @@ from pyteomics import mgf
 ###########################
 # Mass Spectra Transforms
 ###########################
-def discretize_spectra(mzis, bin_width=.001, intensity_power=.5):
+def discretize_spectra(mzis, pmzs=None, bin_width=.001, intensity_power=.5, expand=False):
     spec_ids = np.concatenate([[i]*m.shape[1] for i,m in enumerate(mzis)]).astype(int)
     mzis = np.concatenate(mzis, axis=1)
-    mz_bin_idxs =  np.rint(mzis[0]/bin_width).astype(int)
+    mzis[1] = mzis[1]**intensity_power
+    mz_bin_idxs = np.rint(mzis[0]/bin_width).astype(int)
+
+    if pmzs is not None:
+        nl_bin_idxs = np.rint(np.asarray(pmzs)[spec_ids]/bin_width).astype(int) - mz_bin_idxs
+        mz_bin_idxs = np.concatenate([mz_bin_idxs,mz_bin_idxs.max()+1-nl_bin_idxs])
+        mzis = np.concatenate([mzis,(0+1j)*mzis], axis=1)
+        spec_ids = np.concatenate([spec_ids,spec_ids])
+
     num_bins = mz_bin_idxs.max()+1
 
-    mzis[1] = mzis[1]**intensity_power
+    intensity = sp.coo_matrix((mzis[1], (spec_ids, mz_bin_idxs)), (spec_ids[-1]+1, num_bins))
+    intensity = intensity.multiply(1./norm(intensity.real, axis=1)[:,None]).tocsr()
+    count = sp.coo_matrix(((mzis[1].real>0)+(0+1j)*(mzis[1].imag>0), (spec_ids, mz_bin_idxs)))
+    count = count.multiply(((count.real.getnnz(axis=1)**.5)/norm(count.real, axis=1))[:,None]).tocsr()
 
-    s = sp.coo_matrix((mzis[1], (spec_ids, mz_bin_idxs)), (spec_ids[-1]+1, num_bins))
-    s = s.multiply(1./norm(s, axis=1)[:,None]).tocsr()
-    c = sp.coo_matrix((np.ones_like(mzis[1]), (spec_ids, mz_bin_idxs)), (spec_ids[-1]+1, num_bins))
-    c = c.multiply(((c.getnnz(axis=1)**.5)/norm(c, axis=1))[:,None]).tocsr()
+    S =  {'intensity': intensity.data,
+          'count': count.data,
+          'indptr' : intensity.indptr,
+          'mz': mz_bin_idxs,
+          'bin_width': bin_width,
+          'intensity_power': intensity_power}
 
-    return s,c
+    if expand:
+        S = expand_sparse_spectra(S)
+
+    return S
+
+def expand_sparse_spectra(mz,intensity,count,indptr,**kwargs):
+    S = {}
+
+    for d,data in zip(['i','c'],[intensity, count]):
+        Sd = sp.csr_matrix((data, mz, indptr), dtype=data.dtype)
+        S['mz'+d] = Sd.real
+        if Sd.imag.sum() > 0:
+            S['nl'+d] = Sd.imag
+
+    return S
 
 def condense_sparse_spectra(sparse_spectra, bin_width=.001):
     mzis = [np.array([row.indices*bin_width,row.data])
@@ -39,17 +66,47 @@ def condense_sparse_spectra(sparse_spectra, bin_width=.001):
 ##########
 # Kernel
 ##########
-def neighborhood_kernel(n, m, bin_width=.001, tolerance=.01):
-    data = np.ones(int(tolerance/bin_width)+1).tolist()
-    data = data[::-1]
-    data.extend(data[-2::-1])
-    data = np.array(data)
+def network_kernel(n, m, mass_diffs=[0], react_dist=1, bin_width=.001, tolerance=.01):
 
-    offsets = np.arange(len(data))-(len(data)//2)
+    bin_num = int(2*(tolerance/bin_width)-1)
 
-    N = sp.diags(data, offsets, shape=(n, m), dtype=bool, format='csr')
+    mass_diffs = np.sort(mass_diffs)
+
+    mass_diffs = [-m for m in mass_diffs[::-1]]+[m for m in mass_diffs]
+    if mass_diffs[len(mass_diffs)//2] == 0:
+        mass_diffs.pop(len(mass_diffs)//2)
+
+    mass_diffs = np.rint(np.array(mass_diffs)/bin_width).astype(int)
+
+    def react(mass_diffs, react_dist):
+        if react_dist == 1:
+            return mass_diffs
+        else:
+            return np.add.outer(mass_diffs, react(mass_diffs, react_dist-1))
+
+    mass_diffs = np.abs(react(mass_diffs, react_dist))
+
+    mass_diffs = np.add.outer(mass_diffs, np.arange(-bin_num//2+1, bin_num//2+1))
+    mass_diffs = np.unique(mass_diffs.flatten())
+
+    N = sp.diags(np.ones_like(mass_diffs), mass_diffs, shape=(n, m), format='csr', dtype=bool)
 
     return N
+
+
+#########################
+# Biochemical Masses
+#########################
+
+biochem_masses = [0.,      # Self
+                  12.,     # C
+                  1.00783, # H
+                  2.01566, # H2
+                  15.99491,# O
+                  0.02381, # NH2 - O
+                  78.95851,# PO3
+                  31.97207]# S
+
 
 #######################
 # Mass Spectra Loading
@@ -62,13 +119,12 @@ def read_mgf(in_file):
             d['spectrum'] = np.array([spectrum['m/z array'],
                                       spectrum['intensity array']])
             d['precursor_mz'] = d['pepmass'][0]
-            # d['neutral_losses'] = d['precursor_mz'] -
             msms_df.append(d)
     msms_df = pd.DataFrame(msms_df)
     return msms_df
 
-def write_sparse_msms_file(in_file):
-    pass
+def write_sparse_msms_file(out_file, S):
+    np.savez_compressed(out_file, **S)
 
 def open_msms_file(in_file):
     if '.mgf' in in_file:
@@ -81,7 +137,7 @@ def open_msms_file(in_file):
 def open_sparse_msms_file(in_file):
     if '.npz' in in_file:
         logging.info('Processing {}'.format(os.path.basename(in_file)))
-        return sp.load_npz(in_file).tocsr()
+        return np.load(in_file)
     else:
         logging.error('Unsupported file type: {}'.format(os.path.splitext(in_file)[-1]))
         raise IOError
@@ -107,20 +163,12 @@ def arg_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser(description='BLINK discretizes mass spectra (given .mgf inputs), and scores discretized spectra (given .npz inputs)')
 
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument('-d', '--discretize', nargs='+', required=False,
-                      help='convert input file(s) into CSR matrix format (.npz)')
-    # mode.add_argument('-c', '--concatenate', nargs='+', required=False,
-    #                   help='concatenate CSR matrix files into single file')
-    mode.add_argument('-t', '--trim', nargs='+', required=False,
-                      help='remove empty spectra from CSR matrix file(s)')
-    mode.add_argument('-s', '--score', nargs='+', action=required_length(1,2), required=False,
-                      help='score CSR matrix file with itself or another')
-    # mode.add_argument('-b', '--benchmark', nargs='+', required=False,
-    #                   help='benchmark BLINK performance vs MatchMS')
+    parser.add_argument('files',nargs='+', action=required_length(1,2), metavar= 'F', help='files to process')
 
     #Compute options
     compute_options = parser.add_argument_group()
+    compute_options.add_argument('--trim', action='store_true', default=False, required=False,
+                                 help='remove empty spectra from CSR matrix file(s)')
     compute_options.add_argument('--bin_width', type=float, default=.001, required=False,
                                  help='width of bins in mz')
     compute_options.add_argument('--intensity_power', type=float, default=.5, metavar='I', required=False,
@@ -128,6 +176,10 @@ def arg_parser(parser=None):
 
     compute_options.add_argument('--tolerance', type=float, default=.01, required=False,
                                  help='maximum tolerance in mz for fragment ions to match')
+    compute_options.add_argument('--mass_diffs', type=float, nargs='*', default=[0], required=False,
+                              help='mz diffs to network')
+    compute_options.add_argument('--react_dist', type=int, default=1, required=False,
+                              help='recursively combine mass_diffs within reaction distance')
     compute_options.add_argument('--min_score', type=float, default=.4, metavar='S', required=False,
                                  help='minimum scores to include in output')
     compute_options.add_argument('--min_matches', type=int, default=3, metavar='M', required=False,
@@ -148,244 +200,142 @@ def main():
 
     logging.basicConfig(filename=os.path.join(os.getcwd(),'blink.log'), level=logging.INFO)
 
-    if args.discretize:
+    common_ext = os.path.splitext(os.path.commonprefix([os.path.basename(in_file)[::-1]
+                                                        for input in args.files
+                                                        for in_file in glob.glob(input)])[::-1])[1]
+
+    if common_ext == '.mgf':
         logging.info('Discretize Start')
-        total_time = 0
-        number_of_spectra = 0
-        for input in args.discretize:
-            for in_file in glob.glob(input):
-                out_name = '{}_{}_{}'.format(os.path.splitext(os.path.splitext(os.path.basename(in_file))[0])[0],
-                                             str(args.bin_width).replace('.', 'p'),
-                                             str(args.intensity_power).replace('.', 'p'))
-                if args.out_dir:
-                    out_dir = args.out_dir
-                else:
-                    out_dir = os.path.dirname(os.path.abspath(glob.glob(args.discretize[0])[0]))
 
-                logging.info('Output to {}'.format(out_dir))
-                out_loc = os.path.join(out_dir, out_name+'.npz')
+        prefix = os.path.commonprefix([os.path.basename(in_file)
+                                         for input in args.files
+                                         for in_file in glob.glob(input)])
 
-                if not args.force and os.path.isfile(out_loc):
-                    logging.info('{} already exists. Skipping.'.format(out_name))
-                    continue
-                try:
-                    dense_spectra = open_msms_file(in_file).spectrum.tolist()
-
-                    start = timer()
-                    sparse_spectra,sparse_counts = discretize_spectra(dense_spectra,
-                                                                      bin_width=args.bin_width,
-                                                                      intensity_power=args.intensity_power)
-                    end = timer()
-
-                    total_time += end-start
-                    number_of_spectra += len(dense_spectra)
-
-                    sp.save_npz(out_loc, sparse_spectra+((0+1j)*sparse_counts.astype(complex)))
-                except IOError:
-                    continue
-        end = timer()
-        logging.info('Discretize Time: {} seconds, {} spectra'.format(total_time, number_of_spectra))
-        logging.info('Discretize End\n')
-    #
-    # if args.concatenate:
-    #     logging.info('Concatenate Start')
-    #     prefix = os.path.commonprefix([os.path.basename(in_file)
-    #                                      for input in args.concatenate
-    #                                      for in_file in glob.glob(input)])
-    #     suffix = os.path.commonprefix([os.path.basename(in_file)[::-1]
-    #                                    for input in args.concatenate
-    #                                    for in_file in glob.glob(input)])[::-1]
-    #
-    #     out_name = prefix.split('_')
-    #     out_name.insert(1, 'concat')
-    #
-    #     if prefix != suffix:
-    #         out_name += suffix.split('_')
-    #
-    #     out_name = '_'.join(out_name)
-    #
-    #     if args.out_dir:
-    #         out_dir = args.out_dir
-    #     else:
-    #         out_dir = os.path.dirname(os.path.abspath(glob.glob(args.concatenate[0])[0]))
-    #     logging.info('Output to {}'.format(out_dir))
-    #
-    #     out_loc = os.path.join(out_dir, out_name)
-    #
-    #     if not args.force and os.path.isfile(out_loc):
-    #         logging.info('{} already exists. Skipping.'.format(out_name))
-    #         logging.info('Concatenate End\n')
-    #         sys.exit(0)
-    #
-    #     start = timer()
-    #     indptr = sp.vstack([open_sparse_msms_file(in_file)
-    #                                        for input in args.concatenate
-    #                                        for in_file in glob.glob(input)])
-    #     end = timer()
-    #     logging.info('Concatenate Time: {} seconds'.format(end-start))
-    #
-    #     sp.save_npz(out_loc, sparse_spectra_counts)
-    #
-    #     logging.info('Concatenate End\n')
-
-    if args.trim:
-        logging.info('Trim Start')
-        total_time = 0
-        number_of_blanks = 0
-        for input in args.trim:
-            for in_file in glob.glob(input):
-                out_name = os.path.splitext(os.path.splitext(os.path.basename(in_file))[0])[0].split('_')
-                out_name.insert(-2, 'trim')
-                out_name = '_'.join(out_name)
-
-                if args.out_dir:
-                    out_dir = args.out_dir
-                else:
-                    out_dir = os.path.dirname(os.path.abspath(glob.glob(args.trim[0])[0]))
-
-                logging.info('Output to {}'.format(out_dir))
-                out_loc = os.path.join(out_dir, out_name+'.npz')
-
-                if not args.force and os.path.isfile(out_loc):
-                    logging.info('{} already exists. Skipping.'.format(out_name))
-                    continue
-                try:
-                    sparse_spectra_counts = open_sparse_msms_file(in_file)
-
-                    start = timer()
-                    zero_idxs = np.diff(sparse_spectra_counts.indptr) == 0
-                    sparse_spectra_counts = sparse_spectra_counts[~zero_idxs]
-                    end = timer()
-
-                    number_of_blanks += zero_idxs.sum()
-                    total_time += end-start
-
-                    sp.save_npz(out_loc, sparse_spectra_counts)
-                except IOError:
-                    continue
-        end = timer()
-        logging.info('Trim Time: {} seconds, {} blanks trimmed'.format(total_time, number_of_blanks))
-        logging.info('Trim End\n')
-
-    if args.score:
-        logging.info('Score Start')
-        try:
-            assert args.score[0].split('_')[-1:] == args.score[-1].split('_')[-1:]
-        except AssertionError:
-            log.error('Input files have differing bin_width')
-            sys.exit(1)
-
-        out_name = '{}_{}_{}_{}_{}'.format(os.path.splitext(os.path.splitext(os.path.basename(args.score[0]))[0])[0],
-                                           os.path.splitext(os.path.splitext(os.path.basename(args.score[1]))[0])[0]
-                                           if len(args.score) == 2 else '',
-                                           str(args.tolerance).replace('.', 'p'),
-                                           str(args.min_score).replace('.', 'p'),
-                                           str(args.min_matches))
+        out_name = os.path.splitext(os.path.splitext(prefix)[0])[0]
+        # if prefix != suffix:
+        #     outname.append('concat')
+        # if args.trim:
+        #     outname.append('trim')
+        # out_name.append(os.path.splitext(os.path.splitext(suffix)[0])[0])
+        # out_name.append(str(args.bin_width).replace('.', 'p'))
+        # out_name.append(str(args.intensity_power).replace('.', 'p'))
+        #
+        # out_name = '_'.join(out_name)
 
         if args.out_dir:
             out_dir = args.out_dir
         else:
-            out_dir = os.path.dirname(os.path.abspath(args.score[0]))
+            out_dir = os.path.dirname(os.path.abspath(glob.glob(args.files[0])[0]))
+
+        logging.info('Output to {}'.format(out_dir))
+        out_loc = os.path.join(out_dir, out_name+'.npz')
+
+        if not args.force and os.path.isfile(out_loc):
+            logging.info('{} already exists. Skipping.'.format(out_name))
+            logging.info('Discretize End\n')
+            sys.exit(0)
+
+        dense_spectra = np.concatenate([open_msms_file(in_file).spectrum.values
+                                        for input in args.files
+                                        for in_file in glob.glob(input)]).tolist()
+        pmzs = np.concatenate([open_msms_file(in_file).precursor_mz.values
+                                        for input in args.files
+                                        for in_file in glob.glob(input)]).tolist()
+
+        start = timer()
+        S = discretize_spectra(dense_spectra,pmzs=pmzs,bin_width=args.bin_width,intensity_power=args.intensity_power)
+        end = timer()
+
+        if args.trim:
+            zero_idxs = np.diff(S['indptr']) == 0
+            logging.info('Trimmed {} rows: {}'.format(zero_idxs.sum(), ' '.join(np.where(zero_idxs)[0].tolist())))
+            S['indptr'] = np.unique(S['indptr'])
+            S['blanks'] = np.where(zero_idxs)[0]
+
+        write_sparse_msms_file(out_loc, S)
+
+        logging.info('Discretize Time: {} seconds, {} spectra'.format(end-start, len(S['indptr'])))
+        logging.info('Discretize End\n')
+
+    elif common_ext == '.npz':
+        logging.info('Score Start')
+
+        out_name = '_'.join([os.path.splitext(os.path.splitext(os.path.basename(args.files[0]))[0])[0] for f in args.files])
+
+        if args.out_dir:
+            out_dir = args.out_dir
+        else:
+            out_dir = os.path.dirname(os.path.abspath(args.files[0]))
         logging.info('Output to {}'.format(out_dir))
 
         out_loc = os.path.join(out_dir, out_name)
 
         if not args.force and os.path.isfile(out_loc):
             logging.info('{} already exists. Skipping.'.format(out_name))
-            logging.info('Concatenate End\n')
+            logging.info('Score End\n')
+            sys.exit(0)
 
-        sparse_spectra_counts1 = open_sparse_msms_file(args.score[0])
-        sparse_spectra1 = sparse_spectra_counts1.real
-        sparse_counts1 = sparse_spectra_counts1.imag.astype(bool)
+        S1 = open_sparse_msms_file(args.files[0])
+        bin_width = S1['bin_width']
+        S1_blanks = S1.get('blanks',np.array([]))
 
-        if len(args.score) == 1:
-            sparse_spectra2 = sparse_spectra1
-            sparse_counts2 = sparse_counts1
+        S1 = expand_sparse_spectra(**S1)
+        if len(args.files) == 1:
+            S2 = S1
+            S2_blanks = S1_blanks
         else:
-            sparse_spectra_counts2 = open_sparse_msms_file(args.score[1])
-            sparse_spectra2 = sparse_spectra_counts2.real
-            sparse_counts2 = sparse_spectra_counts2.imag.astype(bool)
+            S2 = open_sparse_msms_file(args.files[1])
+            S2_blanks = S1.get('blanks',np.array([]))
 
-        bin_width = float(os.path.splitext(args.score[0])[0].split('_')[-2].replace('p', '.'))
+            try:
+                assert S2['bin_width'] == bin_width
+            except AssertionError:
+                log.error('Input files have differing bin_width')
+                sys.exit(1)
+            S2 = expand_sparse_spectra(**S)
 
-        N = neighborhood_kernel(sparse_spectra1.shape[1], sparse_spectra2.shape[1], bin_width, args.tolerance)
+        N = network_kernel(S1['mzi'].shape[1], S2['mzi'].shape[1],
+                           args.mass_diffs, react_dist=args.react_dist,
+                           bin_width=bin_width, tolerance=args.tolerance)
 
-        start = timer()
-        scores = sparse_spectra1.dot(N).dot(sparse_spectra2.T)
-        matches = sparse_counts1.dot(N).dot(sparse_counts2.T)
-        end = timer()
-        logging.info('Score Time: {} seconds'.format(end-start))
+        S12 = {}
+        for k in set(S1.keys()) & set(S2.keys()):
+            v1, v2 = S1[k], S2[k]
+            start = timer()
+            S12[k] = v1.dot(N).dot(v2.T)
+            end = timer()
+            logging.info('Score Time: {} seconds'.format(end-start))
 
         if (args.min_score > 0) or (args.min_matches > 0):
             logging.info('Filtering')
-            keep_idx = (scores >= args.min_score).maximum(matches >= args.min_matches)
+            keep_idx =  S12['mzi'] >= args.min_score
+            keep_idx = keep_idx.maximum(S12['mzc'] >= args.min_matches)
+            if 'nli' in S12.keys():
+                keep_idx = keep_idx.maximum(S12['nli'] >= args.min_score)
+            if 'nlc' in S12.keys():
+                keep_idx = keep_idx.maximum(S12['nlc'] >= args.min_matches)
 
-            scores = scores.multiply(keep_idx)
-            matches = matches.multiply(keep_idx)
+            for k in S12.keys():
+                S12[k] = S12[k].multiply(keep_idx).tocoo()
 
-        sp.save_npz(out_loc, scores+((0+1j)*matches.astype(complex)))
+        out_df = pd.concat([pd.Series(S12[k].data, name=k,
+                                      index=list(zip((S12[k].col+np.searchsorted(S1_blanks, S12[k].col)).tolist(),
+                                                     (S12[k].row+np.searchsorted(S2_blanks, S12[k].row)).tolist())))
+                            for k in S12.keys()], axis=1)
+
+        out_df.index.names = ['/'.join([str(args.tolerance),
+                                        str(args.mass_diffs),
+                                        str(args.react_dist),
+                                        str(args.min_score),
+                                        str(args.min_matches)]),'']
+
+        out_df.to_csv(out_loc+'.tab', index=True, sep='\t', columns = sorted(out_df.columns,key=lambda c:c[::-1])[::-1])
 
         logging.info('Score End\n')
 
-    # if args.benchmark:
-    #     from matchms import Spectrum
-    #     from matchms.similarity import CosineGreedy
-    #
-    #     logging.info('Benchmark Start')
-    #
-    #     out_name = '{}_{}_{}_{}_{}'.format(os.path.splitext(os.path.splitext(os.path.basename(args.benchmark[0]))[0])[0],
-    #                                        '',
-    #                                        str(args.tolerance).replace('.', 'p'),
-    #                                        '',
-    #                                        '')
-    #
-    #     if args.out_dir:
-    #         out_dir = args.out_dir
-    #     else:
-    #         out_dir = os.path.dirname(os.path.abspath(args.benchmark[0]))
-    #     logging.info('Output to {}'.format(out_dir))
-    #
-    #     out_loc = os.path.join(out_dir, out_name)
-    #
-    #     dense_spectra = open_msms_file(args.benchmark[0]).spectrum.to_numpy()
-    #
-    #     sparse_spectra, sparse_counts = discretize_spectra(dense_spectra,
-    #                                                       bin_width=args.bin_width,
-    #                                                       intensity_power=args.intensity_power)
-    #     dense_spectra = np.array([Spectrum(mz=msms[0],intensities=msms[1])
-    #                               for msms in dense_spectra])
-    #
-    #     N = neighborhood_kernel(sparse_spectra.shape[1], sparse_spectra.shape[1], args.bin_width, args.tolerance)
-    #
-    #     sqrt_cosine = CosineGreedy(tolerance=args.tolerance+args.bin_width/2, intensity_power=args.intensity_power)
-    #
-    #     for log_iter in range(1,6):
-    #         idxs = np.random.randint(0,len(dense_spectra),(3,10**log_iter))
-    #
-    #         for rep in range(3):
-    #             sparse_spectra_sample = sparse_spectra[idxs[rep]]
-    #             sparse_counts_sample = sparse_counts[idxs[rep]]
-    #
-    #             start = timer()
-    #             scores = sparse_spectra_sample.dot(N).dot(sparse_spectra_sample.T)
-    #             matches = sparse_counts_sample.dot(N).dot(sparse_counts_sample.T)
-    #             end = timer()
-    #
-    #             logging.info('BLINK Time: {} spectra, {} seconds'.format(10**log_iter, end-start))
-    #             sp.save_npz(out_loc+'_blink-benchmark-{}'.format(log_iter), scores+((0+1j)*matches.astype(complex)))
-    #
-    #         for rep in range(3):
-    #             dense_spectra_sample = dense_spectra[idxs[rep]].tolist()
-    #
-    #             start = timer()
-    #             scores_matches = sqrt_cosine.matrix(dense_spectra_sample, dense_spectra_sample, is_symmetric=True)
-    #             end = timer()
-    #
-    #             logging.info('MatchMS Time: {} spectra, {} seconds'.format(10**log_iter, end-start))
-    #             sp.save_npz(out_loc+'_matchms-benchmark-{}'.format(log_iter), sp.csr_matrix(scores_matches['score'])+((0+1j)*sp.csr_matrix(scores_matches['matches']).astype(complex)))
-    #
-    #     logging.info('Benchmark End\n')
-
+    else:
+        logging.error('Input files must only be .mgf or .npz')
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
