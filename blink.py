@@ -31,7 +31,7 @@ def remove_duplicate_ions(spectra,min_diff=0.002,do_avg=True):
             dup_mz = spectra[bad_idx][0][sub_idx:sub_idx+2]
             dup_intensities = spectra[bad_idx][1][sub_idx:sub_idx+2]
             new_mz = np.mean(dup_mz)
-            new_intensity = np.mean(dup_intensities)
+            new_intensity = np.max(dup_intensities)
             spectra[bad_idx][0][sub_idx:sub_idx+2] = new_mz
             spectra[bad_idx][1][sub_idx:sub_idx+2] = new_intensity
         mz = np.delete(spectra[bad_idx][0],idx)
