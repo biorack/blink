@@ -16,7 +16,32 @@ from pyteomics import mgf
 ###########################
 # Mass Spectra Transforms
 ###########################
-def discretize_spectra(mzis, pmzs=None, bin_width=.001, intensity_power=.5, expand=False):
+
+def remove_duplicate_ions(spectra,min_diff=0.002,do_avg=True):
+    """
+    helper function to remove ions that are within min_diff.
+    A good rule of thumb is ions have to be greater than 2 bins apart
+    This function averages their m/z and intensities and removes the duplicates
+    """
+    bad_ones = [i for i,s in enumerate(spectra) if min(np.diff(s[0],prepend=0))<=min_diff]
+    for bad_idx in sorted(bad_ones, reverse=True):
+        idx = np.argwhere(np.diff(spectra[bad_idx][0])<min_diff).flatten()
+        idx = sorted(idx,reverse=True)
+        for sub_idx in idx:
+            dup_mz = spectra[bad_idx][0][sub_idx:sub_idx+2]
+            dup_intensities = spectra[bad_idx][1][sub_idx:sub_idx+2]
+            new_mz = np.mean(dup_mz)
+            new_intensity = np.mean(dup_intensities)
+            spectra[bad_idx][0][sub_idx:sub_idx+2] = new_mz
+            spectra[bad_idx][1][sub_idx:sub_idx+2] = new_intensity
+        mz = np.delete(spectra[bad_idx][0],idx)
+        intensity = np.delete(spectra[bad_idx][1],idx)
+        spectra[bad_idx] = np.asarray([mz,intensity])
+    return spectra
+
+def discretize_spectra(mzis, pmzs=None, bin_width=0.001, intensity_power=0.5, expand=False,remove_duplicates=True):
+    if remove_duplicates==True:
+        mzis = remove_duplicate_ions(mzis,min_diff=bin_width*2)
     spec_ids = np.concatenate([[i]*m.shape[1] for i,m in enumerate(mzis)]).astype(int)
     mzis = np.concatenate(mzis, axis=1)
     mzis[1] = mzis[1]**intensity_power
@@ -33,7 +58,7 @@ def discretize_spectra(mzis, pmzs=None, bin_width=.001, intensity_power=.5, expa
     intensity = sp.coo_matrix((mzis[1], (spec_ids, mz_bin_idxs)), (spec_ids[-1]+1, num_bins))
     intensity = intensity.multiply(1./norm(intensity.real, axis=1)[:,None]).tocsr()
     count = sp.coo_matrix(((mzis[1].real>0)+(0+1j)*(mzis[1].imag>0), (spec_ids, mz_bin_idxs)))
-    count = count.multiply(((count.real.getnnz(axis=1)**.5)/norm(count.real, axis=1))[:,None]).tocsr()
+    count = count.multiply(((count.real.getnnz(axis=1)**0.5)/norm(count.real, axis=1))[:,None]).tocsr()
 
     S =  {'intensity': intensity.data,
           'count': count.data,
@@ -58,7 +83,7 @@ def expand_sparse_spectra(mz,intensity,count,indptr,**kwargs):
 
     return S
 
-def condense_sparse_spectra(sparse_spectra, bin_width=.001):
+def condense_sparse_spectra(sparse_spectra, bin_width=0.001):
     mzis = [np.array([row.indices*bin_width,row.data])
             for row in sparse_spectra]
     return mzis
@@ -66,7 +91,7 @@ def condense_sparse_spectra(sparse_spectra, bin_width=.001):
 ##########
 # Kernel
 ##########
-def network_kernel(n, m, mass_diffs=[0], react_dist=1, bin_width=.001, tolerance=.01):
+def network_kernel(n, m, mass_diffs=[0], react_dist=1, bin_width=0.001, tolerance=0.01):
 
     bin_num = int(2*(tolerance/bin_width)-1)
 
