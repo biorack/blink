@@ -163,33 +163,35 @@ def arg_parser(parser=None):
     if parser is None:
         parser = argparse.ArgumentParser(description='BLINK discretizes mass spectra (given .mgf inputs), and scores discretized spectra (given .npz inputs)')
 
-    parser.add_argument('files',nargs='+', action=required_length(1,2), metavar= 'F', help='files to process')
+    parser.add_argument('files',nargs='+', action=required_length(1,2), metavar='F', help='files to process')
+
+    #Discretize options
+    discretize_options = parser.add_argument_group()
+    discretize_options.add_argument('--trim', action='store_true', default=False, required=False,
+                                 help='remove empty spectra when discretizing')
+    discretize_options.add_argument('-b','--bin_width', type=float, metavar='B', default=.001, required=False,
+                                 help='width of bins in mz')
+    discretize_options.add_argument('-i','--intensity_power', type=float, metavar='I', default=.5, required=False,
+                                 help='power to raise intensites to in when scoring')
 
     #Compute options
     compute_options = parser.add_argument_group()
-    compute_options.add_argument('--trim', action='store_true', default=False, required=False,
-                                 help='remove empty spectra from CSR matrix file(s)')
-    compute_options.add_argument('--bin_width', type=float, default=.001, required=False,
-                                 help='width of bins in mz')
-    compute_options.add_argument('--intensity_power', type=float, default=.5, metavar='I', required=False,
-                                 help='power to raise intensites to in when scoring')
-
-    compute_options.add_argument('--tolerance', type=float, default=.01, required=False,
+    compute_options.add_argument('-t','--tolerance', type=float, metavar='T', default=.01, required=False,
                                  help='maximum tolerance in mz for fragment ions to match')
-    compute_options.add_argument('--mass_diffs', type=float, nargs='*', default=[0], required=False,
-                              help='mz diffs to network')
-    compute_options.add_argument('--react_dist', type=int, default=1, required=False,
+    compute_options.add_argument('-d','--mass_diffs', type=float, metavar='D', nargs='*', default=[0], required=False,
+                              help='mass diffs to network')
+    compute_options.add_argument('-r','--react_dist', type=int, metavar='R', default=1, required=False,
                               help='recursively combine mass_diffs within reaction distance')
-    compute_options.add_argument('--min_score', type=float, default=.4, metavar='S', required=False,
-                                 help='minimum scores to include in output')
-    compute_options.add_argument('--min_matches', type=int, default=3, metavar='M', required=False,
+    compute_options.add_argument('-s','--min_score', type=float, default=.4, metavar='S', required=False,
+                                 help='minimum score to include in output')
+    compute_options.add_argument('-m','--min_matches', type=int, default=3, metavar='M', required=False,
                                  help='minimum matches to include in output')
 
     #Output file options
     output_options = parser.add_argument_group()
     output_options.add_argument('-f', '--force', action='store_true', required=False,
                                 help='force file(s) to be remade if they exist')
-    output_options.add_argument('--out_dir', type=str, required=False,
+    output_options.add_argument('-o','--out_dir', type=str, metavar='O', required=False,
                                 help='change output location for output file(s)')
 
     return parser
@@ -212,6 +214,11 @@ def main():
                                          for in_file in glob.glob(input)])
 
         out_name = os.path.splitext(os.path.splitext(prefix)[0])[0]
+
+        if out_name == '':
+            out_name = '_'.join([os.path.splitext(os.path.splitext(os.path.basename(in_file))[0])[0]
+                                 for input in args.files
+                                 for in_file in glob.glob(input)])
         # if prefix != suffix:
         #     outname.append('concat')
         # if args.trim:
@@ -235,16 +242,18 @@ def main():
             logging.info('Discretize End\n')
             sys.exit(0)
 
-        dense_spectra = np.concatenate([open_msms_file(in_file).spectrum.values
-                                        for input in args.files
-                                        for in_file in glob.glob(input)]).tolist()
-        pmzs = np.concatenate([open_msms_file(in_file).precursor_mz.values
-                                        for input in args.files
-                                        for in_file in glob.glob(input)]).tolist()
+        dense_spectra =[open_msms_file(ff)[['spectrum','precursor_mz']]
+                        for f in args.files
+                        for ff in glob.glob(f)]
+        file_ids = np.cumsum(np.array([s.spectrum.shape[0] for s in dense_spectra]))
+        pmzs = np.concatenate([s.precursor_mz for s in dense_spectra]).tolist()
+        dense_spectra = np.concatenate([s.spectrum for s in dense_spectra])
 
         start = timer()
         S = discretize_spectra(dense_spectra,pmzs=pmzs,bin_width=args.bin_width,intensity_power=args.intensity_power)
         end = timer()
+
+        S['file_ids'] = file_ids
 
         if args.trim:
             zero_idxs = np.diff(S['indptr']) == 0
@@ -319,12 +328,12 @@ def main():
                 S12[k] = S12[k].multiply(keep_idx).tocoo()
 
         out_df = pd.concat([pd.Series(S12[k].data, name=k,
-                                      index=list(zip((S12[k].col+np.searchsorted(S1_blanks, S12[k].col)).tolist(),
-                                                     (S12[k].row+np.searchsorted(S2_blanks, S12[k].row)).tolist())))
+                                      index=list(zip(S12[k].col.tolist(),
+                                                     S12[k].row.tolist())))
                             for k in S12.keys()], axis=1)
 
         out_df.index.names = ['/'.join([str(args.tolerance),
-                                        str(args.mass_diffs),
+                                        ','.join([str(d) for d in args.mass_diffs]),
                                         str(args.react_dist),
                                         str(args.min_score),
                                         str(args.min_matches)]),'']

@@ -22,47 +22,50 @@ conda env create -f environment-base.yml
 ## Usage
 
 ```bash
-usage: blink.py [-h] (-d DISCRETIZE [DISCRETIZE ...] | -t TRIM [TRIM ...] | -s SCORE [SCORE ...]) [--bin_width BIN_WIDTH]
-                [--intensity_power I] [--tolerance TOLERANCE] [--min_score S] [--min_matches M] [-f] [--out_dir OUT_DIR]
+>> ./blink.py --help                                     
+usage: blink.py [-h] [--trim] [-b B] [-i I] [-t T] [-d [D ...]] [-r R] [-s S] [-m M] [-f] [-o O]
+                F [F ...]
 
-BLINK discretizes mass spectra (given .mgf inputs), and scores discretized spectra (given .npz inputs)
+BLINK discretizes mass spectra (given .mgf inputs), and scores discretized spectra (given .npz
+inputs)
+
+positional arguments:
+  F                     files to process
 
 optional arguments:
   -h, --help            show this help message and exit
-  -d DISCRETIZE [DISCRETIZE ...], --discretize DISCRETIZE [DISCRETIZE ...]
-                        convert input file(s) into CSR matrix format (.npz)
-  -t TRIM [TRIM ...], --trim TRIM [TRIM ...]
-                        remove empty spectra from CSR matrix file(s)
-  -s SCORE [SCORE ...], --score SCORE [SCORE ...]
-                        score CSR matrix file with itself or another
 
-  --bin_width BIN_WIDTH
-                        width of bins in mz
-  --intensity_power I   power to raise intensites to in when scoring
-  --tolerance TOLERANCE
-                        maximum tolerance in mz for fragment ions to match
-  --min_score S         minimum scores to include in output
-  --min_matches M       minimum matches to include in output
+  --trim                remove empty spectra when discretizing
+  -b B, --bin_width B   width of bins in mz
+  -i I, --intensity_power I
+                        power to raise intensites to in when scoring
+
+  -t T, --tolerance T   maximum tolerance in mz for fragment ions to match
+  -d [D ...], --mass_diffs [D ...]
+                        mass diffs to network
+  -r R, --react_dist R  recursively combine mass_diffs within reaction distance
+  -s S, --min_score S   minimum score to include in output
+  -m M, --min_matches M
+                        minimum matches to include in output
 
   -f, --force           force file(s) to be remade if they exist
-  --out_dir OUT_DIR     change output location for output file(s)
+  -o O, --out_dir O     change output location for output file(s)
+
 
 # Discretize fragmentation mass spectra to sparse matrix format (.npz)
-# Output filename takes form: [file]_[bin_width]_[intensity_scale].npz
 # small = 1e2 spectra, medium = 1e4 spectra
->> blink.py -d ./example/*.mgf
-small_0p001_0p5.npz medium_0p001_0p5.npz
+>> blink.py ./example/small.mgf
+small.npz
+>> blink.py ./example/medium.mgf
+medium.npz
 
 # Compute all-by-all cosine scores and # matching ions for each fragmentation mass spectrum
-# Output filename takes form: [file]__[tolerance]_[min_score]_[min_matches].npz
->> blink.py -s ./example/small_0p001_0p5.npz
-small_0p001_0p5__0p01_0p4_3.npz
+>> blink.py ./example/small.npz
+small.tab
 
 # Compute A-vs-B cosine scores and # matching ions for each fragmentation mass spectrum
-# Output filename takes form: [file1]_[file2]_[tolerance]_[min_score]_[min_matches].npz
-
->> blink.py -s ./example/small_0p001_0p5.npz ./example/medium_0p001_0p5.npz
-small_0p001_0p5_medium_0p001_0p5_0p01_0p4_3.npz
+>> blink.py -s ./example/small.npz ./example/medium.npz
+small_medium.tab
 ```
 
 ## Contributing
