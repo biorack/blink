@@ -17,36 +17,72 @@ from pyteomics import mgf
 # Mass Spectra Transforms
 ###########################
 
-def remove_duplicate_ions(spectra,min_diff=0.002,do_avg=True):
+def remove_duplicate_ions(mzis, min_diff=0.002):
     """
-    helper function to remove ions that are within min_diff.
-    A good rule of thumb is ions have to be greater than 2 bins apart
-    This function averages their m/z and intensities and removes the duplicates
+    remove peaks from a list of 2xM mass spectrum vectors (mzis) that are within min_diff
+    by averaging m/zs and summing intensities to remove duplicates
+
+    options:
+        min_diff, float
+            minimum difference possible given,
+            a good rule of thumb is ions have to be greater than 2 bins apart
+
+    returns:
+        mzis, list of 2xM mass spectrum vectors
     """
-    bad_ones = [i for i,s in enumerate(spectra) if min(np.diff(s[0],prepend=0))<=min_diff]
+    bad_ones = [i for i,s in enumerate(mzis) if min(np.diff(s[0],prepend=0))<=min_diff]
     for bad_idx in sorted(bad_ones, reverse=True):
-        idx = np.argwhere(np.diff(spectra[bad_idx][0])<min_diff).flatten()
+        idx = np.argwhere(np.diff(mzis[bad_idx][0])<min_diff).flatten()
         idx = sorted(idx,reverse=True)
         for sub_idx in idx:
-            dup_mz = spectra[bad_idx][0][sub_idx:sub_idx+2]
-            dup_intensities = spectra[bad_idx][1][sub_idx:sub_idx+2]
+            dup_mz = mzis[bad_idx][0][sub_idx:sub_idx+2]
+            dup_intensities = mzis[bad_idx][1][sub_idx:sub_idx+2]
             new_mz = np.mean(dup_mz)
-            new_intensity = np.max(dup_intensities)
-            spectra[bad_idx][0][sub_idx:sub_idx+2] = new_mz
-            spectra[bad_idx][1][sub_idx:sub_idx+2] = new_intensity
-        mz = np.delete(spectra[bad_idx][0],idx)
-        intensity = np.delete(spectra[bad_idx][1],idx)
-        spectra[bad_idx] = np.asarray([mz,intensity])
-    return spectra
+            new_intensity = np.sum(dup_intensities)
+            mzis[bad_idx][0][sub_idx:sub_idx+2] = new_mz
+            mzis[bad_idx][1][sub_idx:sub_idx+2] = new_intensity
+        mz = np.delete(mzis[bad_idx][0],idx)
+        intensity = np.delete(mzis[bad_idx][1],idx)
+        mzis[bad_idx] = np.asarray([mz,intensity])
 
-def discretize_spectra(mzis, pmzs=None, bin_width=0.001, intensity_power=0.5, expand=False,remove_duplicates=True):
-    if remove_duplicates==True:
+    return mzis
+
+def discretize_spectra(mzis, pmzs=None, bin_width=0.001, intensity_power=0.5, trim_empty=True, remove_duplicates=True):
+    """
+    converts a list of 2xM mass spectrum vectors (mzis) into a dict-based sparse matrix
+
+    options:
+        pmzs, listlike
+            store neutral loss spectra
+        bin_width, float
+            width of bin to use in mz
+        intensity_power, float
+            power to raise intensity to before normalizing
+        remove_duplicates, bool
+            average mz and intensity over peaks within 2 times bin_width
+
+    returns:
+        {'intensity',
+         'count',
+         'spectrum',
+         'mz',
+         'pmz',
+         'bin_width',
+         'intensity_power'}s
+    """
+    if trim_empty:
+        kept, mzis = np.array([[idx,mzi] for idx,mzi
+                                in enumerate(mzis)
+                                if mzi.size>0], dtype=object).T
+    if remove_duplicates:
         mzis = remove_duplicate_ions(mzis,min_diff=bin_width*2)
+
     spec_ids = np.concatenate([[i]*m.shape[1] for i,m in enumerate(mzis)]).astype(int)
     mzis = np.concatenate(mzis, axis=1)
     mzis[1] = mzis[1]**intensity_power
     mz_bin_idxs = np.rint(mzis[0]/bin_width).astype(int)
 
+    # Optionally store nls as imaginary component of complex number with real mzs component
     if pmzs is not None:
         nl_bin_idxs = np.rint(np.asarray(pmzs)[spec_ids]/bin_width).astype(int) - mz_bin_idxs
         mz_bin_idxs = np.concatenate([mz_bin_idxs,mz_bin_idxs.max()+1-nl_bin_idxs])
@@ -55,68 +91,88 @@ def discretize_spectra(mzis, pmzs=None, bin_width=0.001, intensity_power=0.5, ex
 
     num_bins = mz_bin_idxs.max()+1
 
+    # Convert binned mzs/nls and normalize intensities/counts into coordinate list format
     intensity = sp.coo_matrix((mzis[1], (spec_ids, mz_bin_idxs)), (spec_ids[-1]+1, num_bins))
-    intensity = intensity.multiply(1./norm(intensity.real, axis=1)[:,None]).tocsr()
+    intensity = intensity.multiply(1./norm(intensity.real, axis=1)[:,None])
     count = sp.coo_matrix(((mzis[1].real>0)+(0+1j)*(mzis[1].imag>0), (spec_ids, mz_bin_idxs)))
-    count = count.multiply(((count.real.getnnz(axis=1)**0.5)/norm(count.real, axis=1))[:,None]).tocsr()
+    count = count.multiply(((count.real.getnnz(axis=1)**0.5)/norm(count.real, axis=1))[:,None])
 
-    S =  {'intensity': intensity.data,
-          'count': count.data,
-          'indptr' : intensity.indptr,
-          'mz': mz_bin_idxs,
-          'bin_width': bin_width,
-          'intensity_power': intensity_power}
+    S = {'intensity': intensity.data,
+         'count': count.data,
+         'spectrum' : intensity.row,
+         'mz': intensity.col,
+         'pmz': pmzs,
+         'bin_width': bin_width,
+         'intensity_power': intensity_power}
 
-    if expand:
-        S = expand_sparse_spectra(**S)
-
-    return S
-
-def expand_sparse_spectra(mz,intensity,count,indptr,**kwargs):
-    S = {}
-
-    for d,data in zip(['i','c'],[intensity, count]):
-        Sd = sp.csr_matrix((data, mz, indptr), dtype=data.dtype)
-        S['mz'+d] = Sd.real
-        if Sd.imag.sum() > 0:
-            S['nl'+d] = Sd.imag
+    if trim_empty:
+        S['blanks'] = np.where(~kept)[0]
 
     return S
 
-def condense_sparse_spectra(sparse_spectra, bin_width=0.001):
-    mzis = [np.array([row.indices*bin_width,row.data])
-            for row in sparse_spectra]
-    return mzis
 
 ##########
 # Kernel
 ##########
-def network_kernel(n, m, mass_diffs=[0], react_dist=1, bin_width=0.001, tolerance=0.01):
+def network_kernel(S, tolerance=0.01, mass_diffs=[0], react_steps=1):
+    """
+    apply network kernel to all mzs/nls in S that are within
+    tolerance of any combination of mass_diffs within react_steps
 
-    bin_num = int(2*(tolerance/bin_width)-1)
+    options:
+        tolerance, float
+            tolerance in mz from mass_diffs for networking peaks
+        mass_diffs, listlike of floats
+            mass differences to consider networking
+        react_steps, int
+            expand mass_diffs by the +/- combination of all mass_diffs within
+            specified number of reaction steps
 
-    mass_diffs = np.sort(mass_diffs)
+    returns:
+        S + {'intensity_net',
+             'count_net',
+             'spectrum_net',
+             'mz_net'}
+    """
+    bin_num = int(2*(tolerance/S['bin_width'])-1)
+
+    mass_diffs = np.sort(np.abs(mass_diffs))
 
     mass_diffs = [-m for m in mass_diffs[::-1]]+[m for m in mass_diffs]
     if mass_diffs[len(mass_diffs)//2] == 0:
         mass_diffs.pop(len(mass_diffs)//2)
 
-    mass_diffs = np.rint(np.array(mass_diffs)/bin_width).astype(int)
+    mass_diffs = np.rint(np.array(mass_diffs)/S['bin_width']).astype(int)
 
-    def react(mass_diffs, react_dist):
-        if react_dist == 1:
+    # Recursively "react" mass_diffs within a specified number of reation steps
+    def react(mass_diffs, react_steps):
+        if react_steps == 1:
             return mass_diffs
         else:
-            return np.add.outer(mass_diffs, react(mass_diffs, react_dist-1))
+            return np.add.outer(mass_diffs, react(mass_diffs, react_steps-1))
 
-    mass_diffs = np.abs(react(mass_diffs, react_dist))
+    # Expand reacted mass_diffs to have a tolerance
+    mass_diffs = np.abs(react(mass_diffs, react_steps))
+    mass_diffs = np.add.outer(mass_diffs, np.arange(-bin_num//2+1, bin_num//2+1)).flatten()
 
-    mass_diffs = np.add.outer(mass_diffs, np.arange(-bin_num//2+1, bin_num//2+1))
-    mass_diffs = np.unique(mass_diffs.flatten())
+    # Apply kernel by outer summing and flattening low-level sparse matrix data structure
+    S['intensity_net'] = np.add.outer(S['intensity'],
+                                      np.zeros_like(mass_diffs,dtype=complex)
+                                     ).flatten()
+    S['count_net'] = np.add.outer(S['count'],
+                                  np.zeros_like(mass_diffs,dtype=complex)
+                                 ).flatten()
+    S['spectrum_net'] = np.abs(np.add.outer(S['spectrum'],
+                               np.zeros_like(mass_diffs)
+                              ).flatten())
+    S['mz_net'] = np.abs(np.add.outer(S['mz'],
+                                      mass_diffs
+                                     ).flatten()
+                         %(S['mz'].max())+1) # rolling indices only bad if
+                                             # mass spec is measuring mzs below
+                                             # half the mass of an electron
 
-    N = sp.diags(np.ones_like(mass_diffs), mass_diffs, shape=(n, m), format='csr', dtype=bool)
-
-    return N
+    return S
 
 
 #########################
@@ -133,9 +189,51 @@ biochem_masses = [0.,      # Self
                   31.97207]# S
 
 
+#########################
+# Comparing Sparse Spectra
+#########################
+
+def score_sparse_spectra(S1, S2):
+    """
+    score/match/compare two sparse mass spectra
+
+    returns:
+        S1 vs S2 scores, scipy.sparse.csr_matrix
+    """
+    # Expand complex valued sparse matrices into [mz/nl][i/c] matrices
+    def expand_sparse_spectra(S, networked=False):
+        E = {}
+        for k in ['intensity','count']:
+            if networked:
+                k += '_net'
+                Ed = sp.coo_matrix((S[k], (S['spectrum_net'], S['mz_net'])), dtype=S[k].dtype, copy=False)
+            else:
+                Ed = sp.coo_matrix((S[k], (S['mz'], S['spectrum'])), dtype=S[k].dtype, copy=False)
+
+            E['mz'+k[0]] = Ed.real
+            if Ed.imag.sum() > 0:
+                E['nl'+k[0]] = Ed.imag
+
+        return E
+
+    S1,S2 = expand_sparse_spectra(S1, networked=True),expand_sparse_spectra(S2)
+
+    # Return score/matches matrices for mzs and optionally nls
+    S12 = {}
+    for k in set(S1.keys()) & set(S2.keys()):
+        v1, v2 = S1[k].tocsr(), S2[k].tocsc()
+        max_mz = max(v1.shape[1],v2.shape[0])
+        v1.resize((v1.shape[0],max_mz))
+        v2.resize((max_mz,v2.shape[1]))
+        S12[k] = v1.dot(v2)
+
+    return S12
+
+
 #######################
 # Mass Spectra Loading
 #######################
+
 def read_mgf(in_file):
     msms_df = []
     with mgf.MGF(in_file) as reader:
@@ -162,14 +260,17 @@ def open_msms_file(in_file):
 def open_sparse_msms_file(in_file):
     if '.npz' in in_file:
         logging.info('Processing {}'.format(os.path.basename(in_file)))
-        return np.load(in_file)
+        with np.load(in_file, mmap_mode='w+') as S:
+            return dict(S)
     else:
         logging.error('Unsupported file type: {}'.format(os.path.splitext(in_file)[-1]))
         raise IOError
 
+
 #########################
 # Command Line Interface
 #########################
+
 '''
 https://stackoverflow.com/questions/4194948/python-argparse-is-there-a-way-to-specify-a-range-in-nargs
 unutbu
@@ -193,7 +294,9 @@ def arg_parser(parser=None):
     #Discretize options
     discretize_options = parser.add_argument_group()
     discretize_options.add_argument('--trim', action='store_true', default=False, required=False,
-                                 help='remove empty spectra when discretizing')
+                                    help='remove empty spectra when discretizing')
+    discretize_options.add_argument('--dedup', action='store_true', default=True, required=False,
+                                    help='deduplicate fragment ions within 2 times bin_width')
     discretize_options.add_argument('-b','--bin_width', type=float, metavar='B', default=.001, required=False,
                                  help='width of bins in mz')
     discretize_options.add_argument('-i','--intensity_power', type=float, metavar='I', default=.5, required=False,
@@ -205,8 +308,8 @@ def arg_parser(parser=None):
                                  help='maximum tolerance in mz for fragment ions to match')
     compute_options.add_argument('-d','--mass_diffs', type=float, metavar='D', nargs='*', default=[0], required=False,
                               help='mass diffs to network')
-    compute_options.add_argument('-r','--react_dist', type=int, metavar='R', default=1, required=False,
-                              help='recursively combine mass_diffs within reaction distance')
+    compute_options.add_argument('-r','--react_steps', type=int, metavar='R', default=1, required=False,
+                              help='recursively combine mass_diffs within number of reaction steps')
     compute_options.add_argument('-s','--min_score', type=float, default=.4, metavar='S', required=False,
                                  help='minimum score to include in output')
     compute_options.add_argument('-m','--min_matches', type=int, default=3, metavar='M', required=False,
@@ -227,32 +330,26 @@ def main():
 
     logging.basicConfig(filename=os.path.join(os.getcwd(),'blink.log'), level=logging.INFO)
 
-    common_ext = {os.path.splitext(in_file)[1] for f in args.files for in_file in glob.glob(f)}
+    common_ext = {os.path.splitext(in_file)[1]
+                  for f in args.files
+                  for in_file in glob.glob(f)}
     if len(common_ext) == 1:
         common_ext = list(common_ext)[0]
 
     if common_ext == '.mgf':
         logging.info('Discretize Start')
 
-        prefix = os.path.commonprefix([os.path.basename(in_file)
-                                         for input in args.files
-                                         for in_file in glob.glob(input)])
+        files = [os.path.splitext(os.path.splitext(
+                 os.path.basename(in_file))[0])[0]
+                 for input in args.files
+                 for in_file in glob.glob(input)]
 
-        out_name = os.path.splitext(os.path.splitext(prefix)[0])[0]
+        prefix = os.path.commonprefix(files)
 
-        if out_name == '':
-            out_name = '_'.join([os.path.splitext(os.path.splitext(os.path.basename(in_file))[0])[0]
-                                 for input in args.files
-                                 for in_file in glob.glob(input)])
-        # if prefix != suffix:
-        #     outname.append('concat')
-        # if args.trim:
-        #     outname.append('trim')
-        # out_name.append(os.path.splitext(os.path.splitext(suffix)[0])[0])
-        # out_name.append(str(args.bin_width).replace('.', 'p'))
-        # out_name.append(str(args.intensity_power).replace('.', 'p'))
-        #
-        # out_name = '_'.join(out_name)
+        if len(files) > 1:
+            out_name = '-'.join([files[0],files[-1]])
+        else:
+            out_name = files[0]
 
         if args.out_dir:
             out_dir = args.out_dir
@@ -264,7 +361,7 @@ def main():
 
         if not args.force and os.path.isfile(out_loc):
             logging.info('{} already exists. Skipping.'.format(out_name))
-            logging.info('Discretize End\n')
+            logging.info('Discretize End')
             sys.exit(0)
 
         dense_spectra =[open_msms_file(ff)[['spectrum','precursor_mz']]
@@ -275,21 +372,17 @@ def main():
         dense_spectra = np.concatenate([s.spectrum for s in dense_spectra])
 
         start = timer()
-        S = discretize_spectra(dense_spectra,pmzs=pmzs,bin_width=args.bin_width,intensity_power=args.intensity_power)
+        S = discretize_spectra(dense_spectra,pmzs=pmzs,bin_width=args.bin_width,
+                               intensity_power=args.intensity_power,
+                               trim_empty=args.trim,remove_duplicates=args.dedup)
         end = timer()
 
         S['file_ids'] = file_ids
 
-        if args.trim:
-            zero_idxs = np.diff(S['indptr']) == 0
-            logging.info('Trimmed {} rows: {}'.format(zero_idxs.sum(), ' '.join(np.where(zero_idxs)[0].tolist())))
-            S['indptr'] = np.unique(S['indptr'])
-            S['blanks'] = np.where(zero_idxs)[0]
-
         write_sparse_msms_file(out_loc, S)
 
-        logging.info('Discretize Time: {} seconds, {} spectra'.format(end-start, len(S['indptr'])))
-        logging.info('Discretize End\n')
+        logging.info('Discretize Time: {} seconds, {} spectra'.format(end-start, S['spectrum'].max()+1))
+        logging.info('Discretize End')
 
     elif common_ext == '.npz':
         logging.info('Score Start')
@@ -306,39 +399,35 @@ def main():
 
         if not args.force and os.path.isfile(out_loc):
             logging.info('{} already exists. Skipping.'.format(out_name))
-            logging.info('Score End\n')
+            logging.info('Score End')
             sys.exit(0)
 
         S1 = open_sparse_msms_file(args.files[0])
         bin_width = S1['bin_width']
         S1_blanks = S1.get('blanks',np.array([]))
 
-        S1 = expand_sparse_spectra(**S1)
         if len(args.files) == 1:
             S2 = S1
             S2_blanks = S1_blanks
         else:
             S2 = open_sparse_msms_file(args.files[1])
-            S2_blanks = S1.get('blanks',np.array([]))
+            S2_blanks = S2.get('blanks',np.array([]))
 
             try:
                 assert S2['bin_width'] == bin_width
             except AssertionError:
                 log.error('Input files have differing bin_width')
                 sys.exit(1)
-            S2 = expand_sparse_spectra(**S2)
 
-        N = network_kernel(S1['mzi'].shape[1], S2['mzi'].shape[1],
-                           args.mass_diffs, react_dist=args.react_dist,
-                           bin_width=bin_width, tolerance=args.tolerance)
+        S2 = network_kernel(S2,
+                            mass_diffs=args.mass_diffs,
+                            react_steps=args.react_steps,
+                            tolerance=args.tolerance)
 
-        S12 = {}
-        for k in set(S1.keys()) & set(S2.keys()):
-            v1, v2 = S1[k], S2[k]
-            start = timer()
-            S12[k] = v1.dot(N).dot(v2.T)
-            end = timer()
-            logging.info('Score Time: {} seconds'.format(end-start))
+        start = timer()
+        S12 = score_sparse_spectra(S1, S2)
+        end = timer()
+        logging.info('Score Time: {} seconds'.format(end-start))
 
         if (args.min_score > 0) or (args.min_matches > 0):
             logging.info('Filtering')
@@ -351,6 +440,9 @@ def main():
 
             for k in S12.keys():
                 S12[k] = S12[k].multiply(keep_idx).tocoo()
+        else:
+            for k in S12.keys():
+                S12[k] = S12[k].tocoo()
 
         out_df = pd.concat([pd.Series(S12[k].data, name=k,
                                       index=list(zip(S12[k].col.tolist(),
@@ -359,13 +451,13 @@ def main():
 
         out_df.index.names = ['/'.join([str(args.tolerance),
                                         ','.join([str(d) for d in args.mass_diffs]),
-                                        str(args.react_dist),
+                                        str(args.react_steps),
                                         str(args.min_score),
                                         str(args.min_matches)]),'']
 
         out_df.to_csv(out_loc+'.tab', index=True, sep='\t', columns = sorted(out_df.columns,key=lambda c:c[::-1])[::-1])
 
-        logging.info('Score End\n')
+        logging.info('Score End')
 
     else:
         logging.error('Input files must only be .mgf or .npz')
