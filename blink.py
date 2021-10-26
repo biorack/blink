@@ -447,7 +447,7 @@ def main():
                 S12[k] = S12[k].tocoo()
 
         if args.fast_format:
-            write_sparse_msms_file(out_loc+'.npz', S)
+            write_sparse_msms_file(out_loc+'.npz', S12)
         else:
             out_df = pd.concat([pd.Series(S12[k].data, name=k,
                                           index=list(zip(S12[k].col.tolist(),
