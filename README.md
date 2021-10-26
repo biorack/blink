@@ -25,7 +25,7 @@ conda env create -f environment-base.yml
 
 ```bash
 >> ./blink.py --help
-usage: blink.py [-h] [--trim] [--dedup] [-b B] [-i I] [-t T] [-d [D ...]] [-r R] [-s S] [-m M] [-f] [-o O] F [F ...]
+usage: blink.py [-h] [--trim] [--dedup] [-b B] [-i I] [-t T] [-d [D ...]] [-r R] [-s S] [-m M] [--fast_format] [-f] [-o O] F [F ...]
 
 BLINK discretizes mass spectra (given .mgf inputs), and scores discretized spectra (given .npz inputs)
 
@@ -50,6 +50,7 @@ optional arguments:
   -m M, --min_matches M
                         minimum matches to include in output
 
+  --fast_format         use fast .npz format to store scores instead of .tab
   -f, --force           force file(s) to be remade if they exist
   -o O, --out_dir O     change output location for output file(s)
 

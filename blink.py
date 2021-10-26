@@ -295,7 +295,7 @@ def arg_parser(parser=None):
     discretize_options = parser.add_argument_group()
     discretize_options.add_argument('--trim', action='store_true', default=False, required=False,
                                     help='remove empty spectra when discretizing')
-    discretize_options.add_argument('--dedup', action='store_true', default=True, required=False,
+    discretize_options.add_argument('--dedup', action='store_true', default=False, required=False,
                                     help='deduplicate fragment ions within 2 times bin_width')
     discretize_options.add_argument('-b','--bin_width', type=float, metavar='B', default=.001, required=False,
                                  help='width of bins in mz')
@@ -317,6 +317,8 @@ def arg_parser(parser=None):
 
     #Output file options
     output_options = parser.add_argument_group()
+    output_options.add_argument('--fast_format', action='store_true', default=False, required=False,
+                                help='use fast .npz format to store scores instead of .tab')
     output_options.add_argument('-f', '--force', action='store_true', required=False,
                                 help='force file(s) to be remade if they exist')
     output_options.add_argument('-o','--out_dir', type=str, metavar='O', required=False,
@@ -444,18 +446,21 @@ def main():
             for k in S12.keys():
                 S12[k] = S12[k].tocoo()
 
-        out_df = pd.concat([pd.Series(S12[k].data, name=k,
-                                      index=list(zip(S12[k].col.tolist(),
-                                                     S12[k].row.tolist())))
-                            for k in S12.keys()], axis=1)
+        if args.fast_format:
+            write_sparse_msms_file(out_loc+'.npz', S)
+        else:
+            out_df = pd.concat([pd.Series(S12[k].data, name=k,
+                                          index=list(zip(S12[k].col.tolist(),
+                                                         S12[k].row.tolist())))
+                                for k in S12.keys()], axis=1)
 
-        out_df.index.names = ['/'.join([str(args.tolerance),
-                                        ','.join([str(d) for d in args.mass_diffs]),
-                                        str(args.react_steps),
-                                        str(args.min_score),
-                                        str(args.min_matches)]),'']
+            out_df.index.names = ['/'.join([str(args.tolerance),
+                                            ','.join([str(d) for d in args.mass_diffs]),
+                                            str(args.react_steps),
+                                            str(args.min_score),
+                                            str(args.min_matches)]),'']
 
-        out_df.to_csv(out_loc+'.tab', index=True, sep='\t', columns = sorted(out_df.columns,key=lambda c:c[::-1])[::-1])
+            out_df.to_csv(out_loc+'.tab', index=True, sep='\t', columns = sorted(out_df.columns,key=lambda c:c[::-1])[::-1])
 
         logging.info('Score End')
 
