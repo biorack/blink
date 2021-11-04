@@ -197,16 +197,16 @@ def score_sparse_spectra(S1, S2):
         S1 vs S2 scores, scipy.sparse.csr_matrix
     """
     # Expand complex valued sparse matrices into [mz/nl][i/c] matrices
-    def expand_sparse_spectra(S, networked=False):
+    def expand_sparse_spectra(S, shape=None, networked=False):
         E = {}
         for k in ['intensity','count']:
             if networked:
-                num_bins = int(max(S['mz_net'].real.max(),S['mz_net'].imag.max()))+1
+                num_bins = int(S['mz_net'].real.max()-S['mz_net'].imag.min())+1
                 k += '_net'
-                Ed =  sp.coo_matrix((S[k], (S['spectrum_net'], abs(S['mz_net'].real))), dtype=S[k].dtype, copy=False, shape=(S['spectrum_net'][-1]+1,num_bins))
+                Ed =  sp.coo_matrix((S[k], (S['spectrum_net'], (S['mz_net'].real-S['mz'].imag.min()))), dtype=S[k].dtype, copy=False, shape=(S['spectrum_net'][-1]+1,num_bins))
             else:
-                num_bins = int(max(S['mz'].real.max(),S['mz'].imag.max()))+1
-                Ed =  sp.coo_matrix((S[k], (abs(S['mz'].real), S['spectrum'])), dtype=S[k].dtype, copy=False, shape=(num_bins,S['spectrum'][-1]+1))
+                num_bins = int(S['mz'].real.max()-S['mz'].imag.min())+1
+                Ed =  sp.coo_matrix((S[k], (S['mz'].real-S['mz'].imag.min(), S['spectrum'])), dtype=S[k].dtype, copy=False, shape=(num_bins,S['spectrum'][-1]+1))
 
             E['mz'+k[0]] = Ed.real
             if Ed.imag.sum() > 0:
@@ -214,20 +214,27 @@ def score_sparse_spectra(S1, S2):
 
         return E
 
-    S1,S2 = expand_sparse_spectra(S1, networked=True),expand_sparse_spectra(S2)
+    E1,E2 = expand_sparse_spectra(S1, networked=True),expand_sparse_spectra(S2)
+    offset1 = -1*S1['mz'].imag.min()
+    offset2 = -1*S2['mz'].imag.min()
 
     # Return score/matches matrices for mzs and optionally nls
-    S12 = {}
-    for k in set(S1.keys()) & set(S2.keys()):
-        v1, v2 = S1[k].tocsr(), S2[k].tocsc()
+    E12 = {}
+    for k in set(E1.keys()) & set(E2.keys()):
+        v1, v2 = E1[k].tocsr(), E2[k].tocsc()
         if v1.shape[1] != v2.shape[0]:
+            if offset1 > offset2:
+                v2 = sp.hstack(sp.csc_matrix(shape=(offset1-offset2,v2.shape[1])), v2)
+            if offset2 > offset1:
+                v1 = sp.vstack(sp.csr_matrix(shape=(v1.shape[1],offset2-offset1)), v1)
+
             max_mz = max(v1.shape[1],v2.shape[0])
             v1.resize((v1.shape[0],max_mz))
             v2.resize((max_mz,v2.shape[1]))
-        S12[k] = v1.dot(v2)
 
-    return S12
+        E12[k] = v1.dot(v2)
 
+    return E12
 
 #######################
 # Mass Spectra Loading
