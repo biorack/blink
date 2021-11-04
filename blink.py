@@ -68,7 +68,7 @@ def discretize_spectra(mzis, pmzs=None, bin_width=0.001, intensity_power=0.5, tr
          'mz',
          'pmz',
          'bin_width',
-         'intensity_power'}s
+         'intensity_power'}
     """
     if trim_empty:
         kept, mzis = np.array([[idx,mzi] for idx,mzi
@@ -84,17 +84,17 @@ def discretize_spectra(mzis, pmzs=None, bin_width=0.001, intensity_power=0.5, tr
 
     # Optionally store nls as imaginary component of complex number with real mzs component
     if pmzs is not None:
-        nl_bin_idxs = np.rint(np.asarray(pmzs)[spec_ids]/bin_width).astype(int) - mz_bin_idxs
-        mz_bin_idxs = np.concatenate([mz_bin_idxs,mz_bin_idxs.max()+1-nl_bin_idxs])
-        mzis = np.concatenate([mzis,(0+1j)*mzis], axis=1)
-        spec_ids = np.concatenate([spec_ids,spec_ids])
+        nl_bin_idxs = np.rint((np.asarray(pmzs)[spec_ids]-mzis[0])/bin_width).astype(int)
+        mz_bin_idxs = mz_bin_idxs + nl_bin_idxs*(0+1j)
 
-    num_bins = mz_bin_idxs.max()+1
+    num_bins = int(max(mz_bin_idxs.real.max(),mz_bin_idxs.imag.max()))+1
 
     # Convert binned mzs/nls and normalize intensities/counts into coordinate list format
-    intensity = sp.coo_matrix((mzis[1], (spec_ids, mz_bin_idxs)), (spec_ids[-1]+1, num_bins))
+    intensity =  sp.coo_matrix((mzis[1], (spec_ids, mz_bin_idxs.real)), (spec_ids[-1]+1, num_bins))
+    intensity += sp.coo_matrix((mzis[1]*(0+1j), (spec_ids, abs(mz_bin_idxs.imag))), (spec_ids[-1]+1, num_bins))
     intensity = intensity.multiply(1./norm(intensity.real, axis=1)[:,None])
-    count = sp.coo_matrix(((mzis[1].real>0)+(0+1j)*(mzis[1].imag>0), (spec_ids, mz_bin_idxs)))
+    count =  sp.coo_matrix((mzis[1]>0, (spec_ids, mz_bin_idxs.real)), (spec_ids[-1]+1, num_bins))
+    count += sp.coo_matrix(((mzis[1]>0)*(0+1j), (spec_ids, abs(mz_bin_idxs.imag))), (spec_ids[-1]+1, num_bins))
     count = count.multiply(((count.real.getnnz(axis=1)**0.5)/norm(count.real, axis=1))[:,None])
 
     S = {'intensity': intensity.data,
@@ -106,7 +106,7 @@ def discretize_spectra(mzis, pmzs=None, bin_width=0.001, intensity_power=0.5, tr
          'intensity_power': intensity_power}
 
     if trim_empty:
-        S['blanks'] = np.where(~kept)[0]
+        S['blanks'] = np.setdiff1d(np.arange(spec_ids[-1]+1),kept)
 
     return S
 
@@ -121,9 +121,9 @@ def network_kernel(S, tolerance=0.01, mass_diffs=[0], react_steps=1):
 
     options:
         tolerance, float
-            tolerance in mz from mass_diffs for networking peaks
+            tolerance in mz from mass_diffs for networking ions
         mass_diffs, listlike of floats
-            mass differences to consider networking
+            mass differences to consider networking ions
         react_steps, int
             expand mass_diffs by the +/- combination of all mass_diffs within
             specified number of reaction steps
@@ -156,28 +156,21 @@ def network_kernel(S, tolerance=0.01, mass_diffs=[0], react_steps=1):
     mass_diffs = np.add.outer(mass_diffs, np.arange(-bin_num//2+1, bin_num//2+1)).flatten()
 
     # Apply kernel by outer summing and flattening low-level sparse matrix data structure
-    S['intensity_net'] = np.add.outer(S['intensity'],
-                                      np.zeros_like(mass_diffs,dtype=complex)
-                                     ).flatten()
-    S['count_net'] = np.add.outer(S['count'],
-                                  np.zeros_like(mass_diffs,dtype=complex)
-                                 ).flatten()
-    S['spectrum_net'] = np.abs(np.add.outer(S['spectrum'],
-                               np.zeros_like(mass_diffs)
-                              ).flatten())
-    S['mz_net'] = np.abs(np.add.outer(S['mz'],
-                                      mass_diffs
-                                     ).flatten()
-                         %(S['mz'].max())+1) # rolling indices only bad if
-                                             # mass spec is measuring mzs below
-                                             # half the mass of an electron
+    S['intensity_net'] = np.add.outer(S['intensity'], np.zeros_like(mass_diffs)
+                                     ).flatten().astype(S['intensity'].dtype)
+    S['count_net'] = np.add.outer(S['count'], np.zeros_like(mass_diffs)
+                                 ).flatten().astype(S['count'].dtype)
+    S['spectrum_net'] = np.add.outer(S['spectrum'], np.zeros_like(mass_diffs)
+                                    ).flatten()
+    S['mz_net'] =  np.add.outer(S['mz'], mass_diffs
+                               ).flatten().astype(S['mz'].dtype)
 
     return S
 
 
-#########################
+#####################
 # Biochemical Masses
-#########################
+#####################
 
 biochem_masses = [0.,      # Self
                   12.,     # C
@@ -189,9 +182,12 @@ biochem_masses = [0.,      # Self
                   31.97207]# S
 
 
-#########################
+# np.equal.outer(abs(mzs),abs(mzs)).sum(axis=0) & np.equal.outer(spectrum,spectrum).sum(axis=0)
+
+
+############################
 # Comparing Sparse Spectra
-#########################
+############################
 
 def score_sparse_spectra(S1, S2):
     """
@@ -205,10 +201,12 @@ def score_sparse_spectra(S1, S2):
         E = {}
         for k in ['intensity','count']:
             if networked:
+                num_bins = int(max(S['mz_net'].real.max(),S['mz_net'].imag.max()))+1
                 k += '_net'
-                Ed = sp.coo_matrix((S[k], (S['spectrum_net'], S['mz_net'])), dtype=S[k].dtype, copy=False)
+                Ed =  sp.coo_matrix((S[k], (S['spectrum_net'], abs(S['mz_net'].real))), dtype=S[k].dtype, copy=False, shape=(S['spectrum_net'][-1]+1,num_bins))
             else:
-                Ed = sp.coo_matrix((S[k], (S['mz'], S['spectrum'])), dtype=S[k].dtype, copy=False)
+                num_bins = int(max(S['mz'].real.max(),S['mz'].imag.max()))+1
+                Ed =  sp.coo_matrix((S[k], (abs(S['mz'].real), S['spectrum'])), dtype=S[k].dtype, copy=False, shape=(num_bins,S['spectrum'][-1]+1))
 
             E['mz'+k[0]] = Ed.real
             if Ed.imag.sum() > 0:
@@ -222,9 +220,10 @@ def score_sparse_spectra(S1, S2):
     S12 = {}
     for k in set(S1.keys()) & set(S2.keys()):
         v1, v2 = S1[k].tocsr(), S2[k].tocsc()
-        max_mz = max(v1.shape[1],v2.shape[0])
-        v1.resize((v1.shape[0],max_mz))
-        v2.resize((max_mz,v2.shape[1]))
+        if v1.shape[1] != v2.shape[0]:
+            max_mz = max(v1.shape[1],v2.shape[0])
+            v1.resize((v1.shape[0],max_mz))
+            v2.resize((max_mz,v2.shape[1]))
         S12[k] = v1.dot(v2)
 
     return S12
@@ -421,7 +420,7 @@ def main():
                 log.error('Input files have differing bin_width')
                 sys.exit(1)
 
-        S2 = network_kernel(S2,
+        S1 = network_kernel(S1,
                             mass_diffs=args.mass_diffs,
                             react_steps=args.react_steps,
                             tolerance=args.tolerance)
