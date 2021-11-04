@@ -182,9 +182,6 @@ biochem_masses = [0.,      # Self
                   31.97207]# S
 
 
-# np.equal.outer(abs(mzs),abs(mzs)).sum(axis=0) & np.equal.outer(spectrum,spectrum).sum(axis=0)
-
-
 ############################
 # Comparing Sparse Spectra
 ############################
@@ -201,12 +198,12 @@ def score_sparse_spectra(S1, S2):
         E = {}
         for k in ['intensity','count']:
             if networked:
-                num_bins = int(S['mz_net'].real.max()-S['mz_net'].imag.min())+1
+                num_bins = int(S['mz_net'].real.max()-min(S['mz_net'].imag.min(),0))+1
                 k += '_net'
-                Ed =  sp.coo_matrix((S[k], (S['spectrum_net'], (S['mz_net'].real-S['mz'].imag.min()))), dtype=S[k].dtype, copy=False, shape=(S['spectrum_net'][-1]+1,num_bins))
+                Ed =  sp.coo_matrix((S[k], (S['spectrum_net'], (S['mz_net'].real-min(S['mz'].imag.min(),0)))), dtype=S[k].dtype, copy=False, shape=(S['spectrum_net'][-1]+1,num_bins))
             else:
-                num_bins = int(S['mz'].real.max()-S['mz'].imag.min())+1
-                Ed =  sp.coo_matrix((S[k], (S['mz'].real-S['mz'].imag.min(), S['spectrum'])), dtype=S[k].dtype, copy=False, shape=(num_bins,S['spectrum'][-1]+1))
+                num_bins = int(S['mz'].real.max()-min(S['mz'].imag.min(),0))+1
+                Ed =  sp.coo_matrix((S[k], (S['mz'].real-min(S['mz'].imag.min(),0), S['spectrum'])), dtype=S[k].dtype, copy=False, shape=(num_bins,S['spectrum'][-1]+1))
 
             E['mz'+k[0]] = Ed.real
             if Ed.imag.sum() > 0:
