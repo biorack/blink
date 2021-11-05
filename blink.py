@@ -47,7 +47,7 @@ def remove_duplicate_ions(mzis, min_diff=0.002):
 
     return mzis
 
-def discretize_spectra(mzis, pmzs=None, bin_width=0.001, intensity_power=0.5, trim_empty=True, remove_duplicates=True):
+def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_empty=True, remove_duplicates=True):
     """
     converts a list of 2xM mass spectrum vectors (mzis) into a dict-based sparse matrix
 
@@ -62,9 +62,8 @@ def discretize_spectra(mzis, pmzs=None, bin_width=0.001, intensity_power=0.5, tr
             average mz and intensity over peaks within 2 times bin_width
 
     returns:
-        {'intensity',
-         'count',
-         'spectrum',
+        {'ic',
+         'spec_ids',
          'mz',
          'pmz',
          'bin_width',
@@ -78,36 +77,27 @@ def discretize_spectra(mzis, pmzs=None, bin_width=0.001, intensity_power=0.5, tr
         mzis = remove_duplicate_ions(mzis,min_diff=bin_width*2)
 
     spec_ids = np.concatenate([[i]*mzi.shape[1] for i,mzi in enumerate(mzis)]).astype(int)
+    inorm = np.array([1./np.linalg.norm(mzi[1]**intensity_power) for mzi in mzis])
+    cnorm = np.array([mzi.shape[1]**.5/np.linalg.norm(mzi[1]>0) for mzi in mzis])
     mzis = np.concatenate(mzis, axis=1)
     mzis[1] = mzis[1]**intensity_power
     mz_bin_idxs = np.rint(mzis[0]/bin_width).astype(int)
 
-    # Optionally store nls as imaginary component of complex number with real mzs component
-    if pmzs is not None:
-        nl_bin_idxs = np.rint((np.asarray(pmzs)[spec_ids]-mzis[0])/bin_width).astype(int)
-        mz_bin_idxs = mz_bin_idxs + nl_bin_idxs*(0+1j)
+    nl_bin_idxs = np.rint((np.asarray(pmzs)[spec_ids]-mzis[0])/bin_width).astype(int)
+    mz_bin_idxs = mz_bin_idxs + nl_bin_idxs*(0+1j)
 
     shift = -1*mz_bin_idxs.imag.astype(int).min()
 
     num_bins = int(max(mz_bin_idxs.real.max(),mz_bin_idxs.imag.max()))+shift+1
 
     # Convert binned mzs/nls and normalize intensities/counts into coordinate list format
-    intensity =  sp.coo_matrix((mzis[1],        (spec_ids, mz_bin_idxs.real.astype(int)+shift)), (spec_ids[-1]+1, num_bins))
-    intensity += sp.coo_matrix((mzis[1]*(0+1j), (spec_ids, mz_bin_idxs.imag.astype(int)+shift)), (spec_ids[-1]+1, num_bins))
-    intensity = intensity.real.multiply(1./norm(intensity.real, axis=1)[:,None]) + \
-         (0+1j)*intensity.imag.multiply(1./norm(intensity.imag, axis=1)[:,None])
-    intensity = intensity.tocoo()
+    ic =  sp.coo_matrix((inorm[spec_ids]*(mzis[1]),          (spec_ids, mz_bin_idxs.real.astype(int)+shift)), (spec_ids[-1]+1, num_bins), dtype=complex)
+    ic += sp.coo_matrix((cnorm[spec_ids]*(mzis[1]>0)*(0+1j), (spec_ids, mz_bin_idxs.imag.astype(int)+shift)), (spec_ids[-1]+1, num_bins))
+    ic = ic.tocoo()
 
-    count =  sp.coo_matrix(((mzis[1]>0),        (spec_ids, mz_bin_idxs.real.astype(int)+shift)), (spec_ids[-1]+1, num_bins))
-    count += sp.coo_matrix(((mzis[1]>0)*(0+1j), (spec_ids, mz_bin_idxs.imag.astype(int)+shift)), (spec_ids[-1]+1, num_bins))
-    count = count.real.multiply(((count.real.getnnz(axis=1)**0.5)/norm(count.real, axis=1))[:,None]) + \
-     (0+1j)*count.imag.multiply(((count.imag.getnnz(axis=1)**0.5)/norm(count.imag, axis=1))[:,None])
-    count = count.tocoo()
-
-    S = {'intensity': intensity.data,
-         'count': count.data,
-         'spectrum' : intensity.row,
-         'mz': intensity.col,
+    S = {'ic': ic.data,
+         'spec_ids' : ic.row,
+         'mz': ic.col,
          'pmz': pmzs,
          'shift':shift,
          'bin_width': bin_width,
@@ -139,7 +129,7 @@ def network_kernel(S, tolerance=0.01, mass_diffs=[0], react_steps=1):
     returns:
         S + {'intensity_net',
              'count_net',
-             'spectrum_net',
+             'spec_ids_net',
              'mz_net'}
     """
     bin_num = int(2*(tolerance/S['bin_width'])-1)
@@ -164,11 +154,9 @@ def network_kernel(S, tolerance=0.01, mass_diffs=[0], react_steps=1):
     mass_diffs = np.add.outer(mass_diffs, np.arange(-bin_num//2+1, bin_num//2+1)).flatten()
 
     # Apply kernel by outer summing and flattening low-level sparse matrix data structure
-    S['intensity_net'] = np.add.outer(S['intensity'], np.zeros_like(mass_diffs)
-                                     ).flatten().astype(S['intensity'].dtype)
-    S['count_net'] = np.add.outer(S['count'], np.zeros_like(mass_diffs)
-                                 ).flatten().astype(S['count'].dtype)
-    S['spectrum_net'] = np.add.outer(S['spectrum'], np.zeros_like(mass_diffs)
+    S['ic_net'] = np.add.outer(S['ic'], np.zeros_like(mass_diffs)
+                              ).flatten().astype(S['ic'].dtype)
+    S['spec_ids_net'] = np.add.outer(S['spec_ids'], np.zeros_like(mass_diffs)
                                     ).flatten()
     S['mz_net'] =  np.add.outer(S['mz'], mass_diffs
                                ).flatten().astype(S['mz'].dtype)
@@ -207,19 +195,22 @@ def score_sparse_spectra(S1, S2):
     """
     # Expand complex valued sparse matrices into [mz/nl][i/c] matrices
     def expand_sparse_spectra(S, shape=None, networked=False):
-        E = {}
-        for k in ['intensity','count']:
-            if networked:
-                num_bins = S['mz_net'].max()+S['shift_net']+1
-                k += '_net'
-                Ed =  sp.coo_matrix((S[k], (S['spectrum_net'], S['mz_net']+S['shift_net'])), dtype=S[k].dtype, copy=False, shape=(S['spectrum_net'][-1]+1,num_bins))
-            else:
-                num_bins = S['mz'].max()+S['shift']+1
-                Ed =  sp.coo_matrix((S[k], (S['mz']+S['shift'], S['spectrum'])), dtype=S[k].dtype, copy=False, shape=(num_bins,S['spectrum'][-1]+1))
+        if networked:
+            networked = '_net'
+        else:
+            networked = ''
 
-            E['mz'+k[0]] = Ed.real
-            if Ed.imag.sum() > 0:
-                E['nl'+k[0]] = Ed.imag
+        mzs = S['mz'+networked][S['ic'+networked].real>0]
+        nls = S['mz'+networked][S['ic'+networked].imag>0]
+        i = S['ic'+networked].real[S['ic'+networked].real>0]
+        c = S['ic'+networked].imag[S['ic'+networked].imag>0]
+
+        num_bins = max(mzs.max(),nls.max())+S['shift'+networked]+1
+
+        E = {'mzi': sp.coo_matrix((i, (mzs+S['shift'+networked], S['spec_ids'+networked][S['ic'+networked].real>0])), dtype=float, copy=False, shape=(num_bins,S['spec_ids'+networked][-1]+1)),
+             'nli': sp.coo_matrix((i, (nls+S['shift'+networked], S['spec_ids'+networked][S['ic'+networked].imag>0])), dtype=float, copy=False, shape=(num_bins,S['spec_ids'+networked][-1]+1)),
+             'mzc': sp.coo_matrix((c, (mzs+S['shift'+networked], S['spec_ids'+networked][S['ic'+networked].real>0])), dtype=int, copy=False, shape=(num_bins,S['spec_ids'+networked][-1]+1)),
+             'nlc': sp.coo_matrix((c, (nls+S['shift'+networked], S['spec_ids'+networked][S['ic'+networked].imag>0])), dtype=int, copy=False, shape=(num_bins,S['spec_ids'+networked][-1]+1))}
 
         return E
 
@@ -228,12 +219,12 @@ def score_sparse_spectra(S1, S2):
     # Return score/matches matrices for mzs and optionally nls
     E12 = {}
     for k in set(E1.keys()) & set(E2.keys()):
-        v1, v2 = E1[k].tocsr(), E2[k].tocsc()
+        v1, v2 = E1[k].T.tocsr(), E2[k].tocsc()
         if v1.shape[1] != v2.shape[0]:
             if S1['shift_net'] > S2['shift']:
                 v2 = sp.vstack([sp.csc_matrix((S1['shift_net']-S2['shift'],v2.shape[1])), v2])
             if S2['shift'] > S1['shift_net']:
-                v2 = sp.hstack([sp.csr_matrix((v1.shape[0],S2['shift']-S1['shift_net'])), v1])
+                v1 = sp.hstack([sp.csr_matrix((v1.shape[0],S2['shift']-S1['shift_net'])), v1])
 
             max_mz = max(v1.shape[1],v2.shape[0])
             v1.resize((v1.shape[0],max_mz))
@@ -396,7 +387,7 @@ def main():
 
         write_sparse_msms_file(out_loc, S)
 
-        logging.info('Discretize Time: {} seconds, {} spectra'.format(end-start, S['spectrum'].max()+1))
+        logging.info('Discretize Time: {} seconds, {} spectra'.format(end-start, S['spec_ids'].max()+1))
         logging.info('Discretize End')
 
     elif common_ext == '.npz':
