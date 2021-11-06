@@ -69,10 +69,6 @@ small.tab
 # Compute A-vs-B cosine scores and # matching ions for each fragmentation mass spectrum
 >> blink.py ./example/small.npz ./example/medium.npz
 small_medium.tab
-
-# Notice that ordering performs faster than having the smaller file second
->> blink.py ./example/medium.npz ./example/small.npz
-medium_small.tab
 ```
 
 ## Contributing

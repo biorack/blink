@@ -86,7 +86,7 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
     nl_bin_idxs = np.rint((np.asarray(pmzs)[spec_ids]-mzis[0])/bin_width).astype(int)
     mz_bin_idxs = mz_bin_idxs + nl_bin_idxs*(0+1j)
 
-    shift = -1*mz_bin_idxs.imag.astype(int).min()
+    shift = -1*mz_bin_idxs.imag.min().astype(int)
 
     num_bins = int(max(mz_bin_idxs.real.max(),mz_bin_idxs.imag.max()))+shift+1
 
@@ -160,7 +160,7 @@ def network_kernel(S, tolerance=0.01, mass_diffs=[0], react_steps=1):
                                     ).flatten()
     S['mz_net'] =  np.add.outer(S['mz'], mass_diffs
                                ).flatten().astype(S['mz'].dtype)
-    S['shift_net'] = -1*S['mz_net'].min()+S['shift']
+    S['shift_net'] = S['shift']-S['mz_net'].min()
 
     return S
 
@@ -179,14 +179,11 @@ biochem_masses = [0.,      # Self
                   31.97207]# S
 
 
-# np.equal.outer(abs(mzs),abs(mzs)).sum(axis=0) & np.equal.outer(spectrum,spectrum).sum(axis=0)
-
-
 ############################
 # Comparing Sparse Spectra
 ############################
 
-def score_sparse_spectra(S1, S2):
+def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1):
     """
     score/match/compare two sparse mass spectra
 
@@ -200,31 +197,39 @@ def score_sparse_spectra(S1, S2):
         else:
             networked = ''
 
-        mzs = S['mz'+networked][S['ic'+networked].real>0]
-        nls = S['mz'+networked][S['ic'+networked].imag>0]
-        i = S['ic'+networked].real[S['ic'+networked].real>0]
-        c = S['ic'+networked].imag[S['ic'+networked].imag>0]
+        mz = S['mz'+networked][S['ic'+networked].real>0]
+        nl = S['mz'+networked][S['ic'+networked].imag>0]
+        i =  S['ic'+networked].real[S['ic'+networked].real>0]
+        c =  S['ic'+networked].imag[S['ic'+networked].imag>0]
 
-        num_bins = max(mzs.max(),nls.max())+S['shift'+networked]+1
+        num_bins = max(mz.max(),nl.max())+S['shift'+networked]+1
 
-        E = {'mzi': sp.coo_matrix((i, (mzs+S['shift'+networked], S['spec_ids'+networked][S['ic'+networked].real>0])), dtype=float, copy=False, shape=(num_bins,S['spec_ids'+networked][-1]+1)),
-             'nli': sp.coo_matrix((i, (nls+S['shift'+networked], S['spec_ids'+networked][S['ic'+networked].imag>0])), dtype=float, copy=False, shape=(num_bins,S['spec_ids'+networked][-1]+1)),
-             'mzc': sp.coo_matrix((c, (mzs+S['shift'+networked], S['spec_ids'+networked][S['ic'+networked].real>0])), dtype=int, copy=False, shape=(num_bins,S['spec_ids'+networked][-1]+1)),
-             'nlc': sp.coo_matrix((c, (nls+S['shift'+networked], S['spec_ids'+networked][S['ic'+networked].imag>0])), dtype=int, copy=False, shape=(num_bins,S['spec_ids'+networked][-1]+1))}
+        E = {'mzi': sp.coo_matrix((i, (mz+S['shift'+networked], S['spec_ids'+networked][S['ic'+networked].real>0])), dtype=float, copy=False, shape=(num_bins,S['spec_ids'+networked][-1]+1)),
+             'nli': sp.coo_matrix((i, (nl+S['shift'+networked], S['spec_ids'+networked][S['ic'+networked].imag>0])), dtype=float, copy=False, shape=(num_bins,S['spec_ids'+networked][-1]+1)),
+             'mzc': sp.coo_matrix((c, (mz+S['shift'+networked], S['spec_ids'+networked][S['ic'+networked].real>0])), dtype=int,   copy=False, shape=(num_bins,S['spec_ids'+networked][-1]+1)),
+             'nlc': sp.coo_matrix((c, (nl+S['shift'+networked], S['spec_ids'+networked][S['ic'+networked].imag>0])), dtype=int,   copy=False, shape=(num_bins,S['spec_ids'+networked][-1]+1))}
 
         return E
 
-    E1,E2 = expand_sparse_spectra(S1, networked=True),expand_sparse_spectra(S2)
+    ordered = S1['ic'].size < S2['ic'].size
 
-    # Return score/matches matrices for mzs and optionally nls
+    network_kernel(S1 if ordered else S2, tolerance, mass_diffs, react_steps)
+
+    E1 = expand_sparse_spectra(S1, networked=ordered)
+    E2 = expand_sparse_spectra(S2, networked=not ordered)
+
+    S1_shift = 'shift_net' if ordered else 'shift'
+    S2_shift = 'shift' if ordered else 'shift_net'
+
+    # Return score/matches matrices for mzs/nls
     E12 = {}
     for k in set(E1.keys()) & set(E2.keys()):
         v1, v2 = E1[k].T.tocsr(), E2[k].tocsc()
         if v1.shape[1] != v2.shape[0]:
-            if S1['shift_net'] > S2['shift']:
-                v2 = sp.vstack([sp.csc_matrix((S1['shift_net']-S2['shift'],v2.shape[1])), v2])
-            if S2['shift'] > S1['shift_net']:
-                v1 = sp.hstack([sp.csr_matrix((v1.shape[0],S2['shift']-S1['shift_net'])), v1])
+            if S1[S1_shift] > S2[S2_shift]:
+                v2 = sp.vstack([sp.csc_matrix((S1[S1_shift]-S2[S2_shift],v2.shape[1])), v2])
+            if S2[S2_shift] > S1[S1_shift]:
+                v1 = sp.hstack([sp.csr_matrix((v1.shape[0],S2[S2_shift]-S1[S1_shift])), v1])
 
             max_mz = max(v1.shape[1],v2.shape[0])
             v1.resize((v1.shape[0],max_mz))
@@ -425,13 +430,11 @@ def main():
                 log.error('Input files have differing bin_width')
                 sys.exit(1)
 
-        S1 = network_kernel(S1,
-                            mass_diffs=args.mass_diffs,
-                            react_steps=args.react_steps,
-                            tolerance=args.tolerance)
-
         start = timer()
-        S12 = score_sparse_spectra(S1, S2)
+        S12 = score_sparse_spectra(S1, S2,
+                                   mass_diffs=args.mass_diffs,
+                                   react_steps=args.react_steps,
+                                   tolerance=args.tolerance)
         end = timer()
         logging.info('Score Time: {} seconds'.format(end-start))
 
