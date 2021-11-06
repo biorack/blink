@@ -187,6 +187,14 @@ def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1):
     """
     score/match/compare two sparse mass spectra
 
+    tolerance, float
+        tolerance in mz from mass_diffs for networking ions
+    mass_diffs, listlike of floats
+        mass differences to consider networking ions
+    react_steps, int
+        expand mass_diffs by the +/- combination of all mass_diffs within
+        specified number of reaction steps
+
     returns:
         S1 vs S2 scores, scipy.sparse.csr_matrix
     """
@@ -218,18 +226,18 @@ def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1):
     E1 = expand_sparse_spectra(S1, networked=ordered)
     E2 = expand_sparse_spectra(S2, networked=not ordered)
 
-    S1_shift = 'shift_net' if ordered else 'shift'
-    S2_shift = 'shift' if ordered else 'shift_net'
+    S1_shift = S1['shift_net'] if ordered else S1['shift']
+    S2_shift = S2['shift'] if ordered else S2['shift_net']
 
     # Return score/matches matrices for mzs/nls
     E12 = {}
     for k in set(E1.keys()) & set(E2.keys()):
         v1, v2 = E1[k].T.tocsr(), E2[k].tocsc()
         if v1.shape[1] != v2.shape[0]:
-            if S1[S1_shift] > S2[S2_shift]:
-                v2 = sp.vstack([sp.csc_matrix((S1[S1_shift]-S2[S2_shift],v2.shape[1])), v2])
-            if S2[S2_shift] > S1[S1_shift]:
-                v1 = sp.hstack([sp.csr_matrix((v1.shape[0],S2[S2_shift]-S1[S1_shift])), v1])
+            if S1_shift > S2_shift:
+                v2 = sp.vstack([sp.csc_matrix((S1_shift-S2_shift,v2.shape[1])), v2])
+            if S2_shift > S1_shift:
+                v1 = sp.hstack([sp.csr_matrix((v1.shape[0],S2_shift-S1_shift)), v1])
 
             max_mz = max(v1.shape[1],v2.shape[0])
             v1.resize((v1.shape[0],max_mz))
