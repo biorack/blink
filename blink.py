@@ -49,11 +49,9 @@ def remove_duplicate_ions(mzis, min_diff=0.002):
 
 def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_empty=True, remove_duplicates=True):
     """
-    converts a list of 2xM mass spectrum vectors (mzis) into a dict-based sparse matrix
+    converts a list of 2xM mass spectrum vectors (mzis) and pmzs into a dict-based sparse matrix of [mz/nl][i/c] components
 
     options:
-        pmzs, listlike
-            store neutral loss spectra
         bin_width, float
             width of bin to use in mz
         intensity_power, float
@@ -81,9 +79,9 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
     cnorm = np.array([mzi.shape[1]**.5/np.linalg.norm(mzi[1]>0) for mzi in mzis])
     mzis = np.concatenate(mzis, axis=1)
     mzis[1] = mzis[1]**intensity_power
-    mz_bin_idxs = np.rint(mzis[0]/bin_width).astype(int)
+    mz_bin_idxs = np.rint(mzis[0]/bin_width).astype(complex)
 
-    nl_bin_idxs = np.rint((np.asarray(pmzs)[spec_ids]-mzis[0])/bin_width).astype(int)
+    nl_bin_idxs = np.rint(np.asarray(pmzs)[spec_ids]/bin_width).astype(complex) - mz_bin_idxs
     mz_bin_idxs = mz_bin_idxs + nl_bin_idxs*(0+1j)
 
     shift = -1*mz_bin_idxs.imag.min().astype(int)
@@ -91,9 +89,11 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
     num_bins = int(max(mz_bin_idxs.real.max(),mz_bin_idxs.imag.max()))+shift+1
 
     # Convert binned mzs/nls and normalize intensities/counts into coordinate list format
-    ic =  sp.coo_matrix((inorm[spec_ids]*(mzis[1]),          (spec_ids, mz_bin_idxs.real.astype(int)+shift)), (spec_ids[-1]+1, num_bins), dtype=complex)
-    ic += sp.coo_matrix((cnorm[spec_ids]*(mzis[1]>0)*(0+1j), (spec_ids, mz_bin_idxs.imag.astype(int)+shift)), (spec_ids[-1]+1, num_bins))
-    ic = ic.tocoo()
+    ic =  sp.coo_matrix((np.concatenate([inorm[spec_ids]*(mzis[1]), cnorm[spec_ids]*(mzis[1]>0)*(0+1j)]),
+                        (np.concatenate([spec_ids,spec_ids]),
+                         np.concatenate([mz_bin_idxs.real.astype(int)+shift, mz_bin_idxs.imag.astype(int)+shift]))),
+                         shape=(spec_ids[-1]+1, num_bins),
+                         dtype=complex)
 
     S = {'ic': ic.data,
          'spec_ids' : ic.row,
@@ -230,22 +230,22 @@ def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1):
     S2_shift = S2['shift'] if ordered else S2['shift_net']
 
     # Return score/matches matrices for mzs/nls
-    E12 = {}
+    S12 = {}
     for k in set(E1.keys()) & set(E2.keys()):
         v1, v2 = E1[k].T.tocsr(), E2[k].tocsc()
-        if v1.shape[1] != v2.shape[0]:
-            if S1_shift > S2_shift:
-                v2 = sp.vstack([sp.csc_matrix((S1_shift-S2_shift,v2.shape[1])), v2])
-            if S2_shift > S1_shift:
-                v1 = sp.hstack([sp.csr_matrix((v1.shape[0],S2_shift-S1_shift)), v1])
 
-            max_mz = max(v1.shape[1],v2.shape[0])
-            v1.resize((v1.shape[0],max_mz))
-            v2.resize((max_mz,v2.shape[1]))
+        if S1_shift > S2_shift:
+            v2 = sp.vstack([sp.csc_matrix((S1_shift-S2_shift,v2.shape[1])), v2])
+        if S2_shift > S1_shift:
+            v1 = sp.hstack([sp.csr_matrix((v1.shape[0],S2_shift-S1_shift)), v1])
 
-        E12[k] = v1.dot(v2)
+        max_mz = max(v1.shape[1],v2.shape[0])
+        v1.resize((v1.shape[0],max_mz))
+        v2.resize((max_mz,v2.shape[1]))
 
-    return E12
+        S12[k] = v1.dot(v2)
+
+    return S12
 
 #######################
 # Mass Spectra Loading
