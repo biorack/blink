@@ -231,9 +231,11 @@ def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1):
         v1, v2 = E1[k].T, E2[k]
 
         if S1_shift < S2_shift:
-            v1 = sp.hstack([sp.coo_matrix((v1.shape[0], S2_shift-S1_shift), dtype=v1.dtype), v1])
+            v1 = sp.hstack([sp.coo_matrix((v1.shape[0], S2_shift-S1_shift), dtype=v1.dtype), v1],
+                           format='csr', dtype=v1.dtype)
         if S2_shift < S1_shift:
-            v2 = sp.vstack([sp.coo_matrix((S1_shift-S2_shift, v2.shape[0]), dtype=v2.dtype), v2])
+            v2 = sp.vstack([sp.coo_matrix((S1_shift-S2_shift, v2.shape[0]), dtype=v2.dtype), v2],
+                           format='csc', dtype=v2.dtype)
 
         max_mz = max(v1.shape[1],v2.shape[0])
         v1.resize((v1.shape[0],max_mz))
