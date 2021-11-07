@@ -76,7 +76,7 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
 
     spec_ids = np.concatenate([[i]*mzi.shape[1] for i,mzi in enumerate(mzis)]).astype(int)
     inorm = np.array([1./np.linalg.norm(mzi[1]**intensity_power) for mzi in mzis])
-    cnorm = np.array([mzi.shape[1]**.5/np.linalg.norm(mzi[1]>0) for mzi in mzis])
+    cnorm = np.array([mzi.shape[1]**.5/np.linalg.norm(np.ones_like(mzi[1])) for mzi in mzis])
     mzis = np.concatenate(mzis, axis=1)
     mzis[1] = mzis[1]**intensity_power
     mz_bin_idxs = np.rint(mzis[0]/bin_width).astype(complex)
@@ -84,15 +84,12 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
     nl_bin_idxs = np.rint(np.asarray(pmzs)[spec_ids]/bin_width).astype(complex) - mz_bin_idxs
     mz_bin_idxs = mz_bin_idxs + nl_bin_idxs*(0+1j)
 
-    shift = -1*mz_bin_idxs.imag.min().astype(int)
+    shift = -np.rint(mz_bin_idxs.imag.min()).astype(int)
 
-    num_bins = int(max(mz_bin_idxs.real.max(),mz_bin_idxs.imag.max()))+shift+1
-
-    # Convert binned mzs/nls and normalize intensities/counts into coordinate list format
-    ic =  sp.coo_matrix((np.concatenate([inorm[spec_ids]*(mzis[1]), cnorm[spec_ids]*(mzis[1]>0)*(0+1j)]),
-                        (np.concatenate([spec_ids,spec_ids]),
+    # Convert binned mzs/nls and normalized intensities/counts into coordinate list format
+    ic =  sp.coo_matrix((np.concatenate([inorm[spec_ids]*(mzis[1]), cnorm[spec_ids]*np.ones_like(mzis[1])*(0+1j)]),
+                        (np.concatenate([spec_ids, spec_ids]),
                          np.concatenate([mz_bin_idxs.real.astype(int)+shift, mz_bin_idxs.imag.astype(int)+shift]))),
-                         shape=(spec_ids[-1]+1, num_bins),
                          dtype=complex)
 
     S = {'ic': ic.data,
@@ -161,6 +158,7 @@ def network_kernel(S, tolerance=0.01, mass_diffs=[0], react_steps=1):
     S['mz_net'] =  np.add.outer(S['mz'], mass_diffs
                                ).flatten().astype(S['mz'].dtype)
     S['shift_net'] = S['shift']-S['mz_net'].min()
+    S['mz_net'] -= S['mz_net'].min()
 
     return S
 
@@ -210,12 +208,10 @@ def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1):
         i =  S['ic'+networked].real[S['ic'+networked].real>0]
         c =  S['ic'+networked].imag[S['ic'+networked].imag>0]
 
-        num_bins = max(mz.max(),nl.max())+S['shift'+networked]+1
-
-        E = {'mzi': sp.coo_matrix((i, (mz+S['shift'+networked], S['spec_ids'+networked][S['ic'+networked].real>0])), dtype=float, copy=False, shape=(num_bins,S['spec_ids'+networked][-1]+1)),
-             'nli': sp.coo_matrix((i, (nl+S['shift'+networked], S['spec_ids'+networked][S['ic'+networked].imag>0])), dtype=float, copy=False, shape=(num_bins,S['spec_ids'+networked][-1]+1)),
-             'mzc': sp.coo_matrix((c, (mz+S['shift'+networked], S['spec_ids'+networked][S['ic'+networked].real>0])), dtype=int,   copy=False, shape=(num_bins,S['spec_ids'+networked][-1]+1)),
-             'nlc': sp.coo_matrix((c, (nl+S['shift'+networked], S['spec_ids'+networked][S['ic'+networked].imag>0])), dtype=int,   copy=False, shape=(num_bins,S['spec_ids'+networked][-1]+1))}
+        E = {'mzi': sp.coo_matrix((i, (mz, S['spec_ids'+networked][S['ic'+networked].real>0])), dtype=float, copy=False),
+             'nli': sp.coo_matrix((i, (nl, S['spec_ids'+networked][S['ic'+networked].imag>0])), dtype=float, copy=False),
+             'mzc': sp.coo_matrix((c, (mz, S['spec_ids'+networked][S['ic'+networked].real>0])), dtype=int,   copy=False),
+             'nlc': sp.coo_matrix((c, (nl, S['spec_ids'+networked][S['ic'+networked].imag>0])), dtype=int,   copy=False)}
 
         return E
 
@@ -232,18 +228,18 @@ def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1):
     # Return score/matches matrices for mzs/nls
     S12 = {}
     for k in set(E1.keys()) & set(E2.keys()):
-        v1, v2 = E1[k].T.tocsr(), E2[k].tocsc()
+        v1, v2 = E1[k].T, E2[k]
 
-        if S1_shift > S2_shift:
-            v2 = sp.vstack([sp.csc_matrix((S1_shift-S2_shift,v2.shape[1])), v2])
-        if S2_shift > S1_shift:
-            v1 = sp.hstack([sp.csr_matrix((v1.shape[0],S2_shift-S1_shift)), v1])
+        if S1_shift < S2_shift:
+            v1 = sp.hstack([sp.coo_matrix((v1.shape[0], S2_shift-S1_shift), dtype=v1.dtype), v1])
+        if S2_shift < S1_shift:
+            v2 = sp.vstack([sp.coo_matrix((S1_shift-S2_shift, v2.shape[0]), dtype=v2.dtype), v2])
 
         max_mz = max(v1.shape[1],v2.shape[0])
         v1.resize((v1.shape[0],max_mz))
         v2.resize((max_mz,v2.shape[1]))
 
-        S12[k] = v1.dot(v2)
+        S12[k] = v1.tocsr().dot(v2.tocsc())
 
     return S12
 
