@@ -47,7 +47,7 @@ def remove_duplicate_ions(mzis, min_diff=0.002):
 
     return mzis
 
-def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_empty=True, remove_duplicates=True):
+def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_empty=False, remove_duplicates=False):
     """
     converts a list of 2xM mass spectrum vectors (mzis) and pmzs into a dict-based sparse matrix of [mz/nl][i/c] components
 
@@ -84,7 +84,7 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
     nl_bin_idxs = np.rint(np.asarray(pmzs)[spec_ids]/bin_width).astype(complex) - mz_bin_idxs
     mz_bin_idxs = mz_bin_idxs + nl_bin_idxs*(0+1j)
 
-    shift = -np.rint(mz_bin_idxs.imag.min()).astype(int)
+    shift = -mz_bin_idxs.imag.min().astype(int)
 
     # Convert binned mzs/nls and normalized intensities/counts into coordinate list format
     ic =  sp.coo_matrix((np.concatenate([inorm[spec_ids]*(mzis[1]), cnorm[spec_ids]*np.ones_like(mzis[1])*(0+1j)]),
