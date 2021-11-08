@@ -75,12 +75,13 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
         mzis = remove_duplicate_ions(mzis,min_diff=bin_width*2)
 
     spec_ids = np.concatenate([[i]*mzi.shape[1] for i,mzi in enumerate(mzis)]).astype(int)
+
     inorm = np.array([1./np.linalg.norm(mzi[1]**intensity_power) for mzi in mzis])
     cnorm = np.array([mzi.shape[1]**.5/np.linalg.norm(np.ones_like(mzi[1])) for mzi in mzis])
+
     mzis = np.concatenate(mzis, axis=1)
     mzis[1] = mzis[1]**intensity_power
     mz_bin_idxs = np.rint(mzis[0]/bin_width).astype(complex)
-
     nl_bin_idxs = np.rint(np.asarray(pmzs)[spec_ids]/bin_width).astype(complex) - mz_bin_idxs
     mz_bin_idxs = mz_bin_idxs + nl_bin_idxs*(0+1j)
 
@@ -151,12 +152,9 @@ def network_kernel(S, tolerance=0.01, mass_diffs=[0], react_steps=1):
     mass_diffs = np.add.outer(mass_diffs, np.arange(-bin_num//2+1, bin_num//2+1)).flatten()
 
     # Apply kernel by outer summing and flattening low-level sparse matrix data structure
-    S['ic_net'] = np.add.outer(S['ic'], np.zeros_like(mass_diffs)
-                              ).flatten().astype(S['ic'].dtype)
-    S['spec_ids_net'] = np.add.outer(S['spec_ids'], np.zeros_like(mass_diffs)
-                                    ).flatten()
-    S['mz_net'] =  np.add.outer(S['mz'], mass_diffs
-                               ).flatten().astype(S['mz'].dtype)
+    S['ic_net'] = np.add.outer(S['ic'], np.zeros_like(mass_diffs, dtype=complex)).flatten()
+    S['spec_ids_net'] = np.add.outer(S['spec_ids'], np.zeros_like(mass_diffs)).flatten()
+    S['mz_net'] =  np.add.outer(S['mz'], mass_diffs).flatten()
     S['shift_net'] = S['shift']-S['mz_net'].min()
     S['mz_net'] -= S['mz_net'].min()
 
@@ -205,13 +203,15 @@ def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1):
 
         mz = S['mz'+networked][S['ic'+networked].real>0]
         nl = S['mz'+networked][S['ic'+networked].imag>0]
+        mz_spec_ids = S['spec_ids'+networked][S['ic'+networked].real>0]
+        nl_spec_ids = S['spec_ids'+networked][S['ic'+networked].imag>0]
         i =  S['ic'+networked].real[S['ic'+networked].real>0]
         c =  S['ic'+networked].imag[S['ic'+networked].imag>0]
 
-        E = {'mzi': sp.coo_matrix((i, (mz, S['spec_ids'+networked][S['ic'+networked].real>0])), dtype=float, copy=False),
-             'nli': sp.coo_matrix((i, (nl, S['spec_ids'+networked][S['ic'+networked].imag>0])), dtype=float, copy=False),
-             'mzc': sp.coo_matrix((c, (mz, S['spec_ids'+networked][S['ic'+networked].real>0])), dtype=int,   copy=False),
-             'nlc': sp.coo_matrix((c, (nl, S['spec_ids'+networked][S['ic'+networked].imag>0])), dtype=int,   copy=False)}
+        E = {'mzi': sp.coo_matrix((i, (mz, mz_spec_ids)), dtype=float, copy=False),
+             'nli': sp.coo_matrix((i, (nl, nl_spec_ids)), dtype=float, copy=False),
+             'mzc': sp.coo_matrix((c, (mz, mz_spec_ids)), dtype=int,   copy=False),
+             'nlc': sp.coo_matrix((c, (nl, nl_spec_ids)), dtype=int,   copy=False)}
 
         return E
 
@@ -231,11 +231,9 @@ def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1):
         v1, v2 = E1[k].T, E2[k]
 
         if S1_shift < S2_shift:
-            v1 = sp.hstack([sp.coo_matrix((v1.shape[0], S2_shift-S1_shift), dtype=v1.dtype), v1],
-                           format='csr', dtype=v1.dtype)
+            v1 = sp.hstack([sp.coo_matrix((v1.shape[0], S2_shift-S1_shift), dtype=v1.dtype), v1], format='csr', dtype=v1.dtype)
         if S2_shift < S1_shift:
-            v2 = sp.vstack([sp.coo_matrix((S1_shift-S2_shift, v2.shape[1]), dtype=v2.dtype), v2],
-                           format='csc', dtype=v2.dtype)
+            v2 = sp.vstack([sp.coo_matrix((S1_shift-S2_shift, v2.shape[1]), dtype=v2.dtype), v2], format='csc', dtype=v2.dtype)
 
         max_mz = max(v1.shape[1],v2.shape[0])
         v1.resize((v1.shape[0],max_mz))
