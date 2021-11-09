@@ -47,7 +47,7 @@ def remove_duplicate_ions(mzis, min_diff=0.002):
 
     return mzis
 
-def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_empty=False, remove_duplicates=False):
+def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_empty=False, remove_duplicates=False,metadata=None):
     """
     converts a list of 2xM mass spectrum vectors (mzis) and pmzs into a dict-based sparse matrix of [mz/nl][i/c] components
 
@@ -100,8 +100,9 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
          'pmz': pmzs,
          'shift':shift,
          'bin_width': bin_width,
-         'intensity_power': intensity_power}
-
+         'intensity_power': intensity_power,
+        'metadata':metadata}
+    
     if trim_empty:
         S['blanks'] = np.setdiff1d(np.arange(spec_ids[-1]+1),kept)
 
