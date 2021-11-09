@@ -77,7 +77,7 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
     spec_ids = np.concatenate([[i]*mzi.shape[1] for i,mzi in enumerate(mzis)]).astype(int)
 
     inorm = np.array([1./np.linalg.norm(mzi[1]**intensity_power) for mzi in mzis])
-    cnorm = np.array([(0+1j)*mzi.shape[1]**.5/np.linalg.norm(np.ones_like(mzi[1])) for mzi in mzis],dtype=complex)
+    cnorm = np.array([mzi.shape[1]**.5/np.linalg.norm(np.ones_like(mzi[1])) for mzi in mzis])
 
     mzis = np.concatenate(mzis, axis=1)
     mzis[1] = mzis[1]**intensity_power
@@ -88,7 +88,7 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
     shift = -mz_bin_idxs.imag.min().astype(int)
 
     # Convert binned mzs/nls and normalized intensities/counts into coordinate list format
-    ic =  sp.coo_matrix((np.concatenate([inorm[spec_ids]*mzis[1], cnorm[spec_ids]]),
+    ic =  sp.coo_matrix((np.concatenate([inorm[spec_ids]*mzis[1], cnorm[spec_ids]*(0+1j)]),
                         (np.concatenate([spec_ids, spec_ids]),
                          np.concatenate([mz_bin_idxs.real.astype(int)+shift,
                                          mz_bin_idxs.imag.astype(int)+shift]))),
@@ -149,8 +149,8 @@ def network_kernel(S, tolerance=0.01, mass_diffs=[0], react_steps=1):
             return np.add.outer(mass_diffs, react(mass_diffs, react_steps-1))
 
     # Expand reacted mass_diffs to have a tolerance
-    mass_diffs = np.unique(react(mass_diffs, react_steps))
-    mass_diffs = np.add.outer(mass_diffs[mass_diffs>=0], np.arange(-bin_num//2+1, bin_num//2+1)).flatten()
+    mass_diffs = np.unique(np.sort(react(mass_diffs, react_steps).flatten()))
+    mass_diffs = np.add.outer(mass_diffs, np.arange(-bin_num//2+1, bin_num//2+1)).flatten()
 
     # Apply kernel by outer summing and flattening low-level sparse matrix data structure
     S['ic_net'] = np.add.outer(S['ic'], np.zeros_like(mass_diffs, dtype=complex)).flatten()
