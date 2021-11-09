@@ -275,7 +275,7 @@ def open_msms_file(in_file):
 def open_sparse_msms_file(in_file):
     if '.npz' in in_file:
         logging.info('Processing {}'.format(os.path.basename(in_file)))
-        with np.load(in_file, mmap_mode='w+') as S:
+        with np.load(in_file, mmap_mode='w+',allow_pickle=True) as S:
             return dict(S)
     else:
         logging.error('Unsupported file type: {}'.format(os.path.splitext(in_file)[-1]))
