@@ -149,7 +149,7 @@ def network_kernel(S, tolerance=0.01, mass_diffs=[0], react_steps=1):
             return np.add.outer(mass_diffs, react(mass_diffs, react_steps-1))
 
     # Expand reacted mass_diffs to have a tolerance
-    mass_diffs = react(mass_diffs, react_steps)
+    mass_diffs = np.unique(react(mass_diffs, react_steps))
     mass_diffs = np.add.outer(mass_diffs[mass_diffs>=0], np.arange(-bin_num//2+1, bin_num//2+1)).flatten()
 
     # Apply kernel by outer summing and flattening low-level sparse matrix data structure
