@@ -47,7 +47,10 @@ def remove_duplicate_ions(mzis, min_diff=0.002):
 
     return mzis
 
-def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_empty=False, remove_duplicates=False,metadata=None):
+def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5,
+                       comp_ids=None, resolve_comp_id='sum_spectra',
+                       trim_empty=False, remove_duplicates=False,
+                       metadata=None):
     """
     converts a list of 2xM mass spectrum vectors (mzis) and pmzs into a dict-based sparse matrix of [mz/nl][i/c] components
 
@@ -75,12 +78,25 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
         mzis = remove_duplicate_ions(mzis,min_diff=bin_width*2)
 
     spec_ids = np.concatenate([[i]*mzi.shape[1] for i,mzi in enumerate(mzis)]).astype(int)
+    if comp_ids is None:
+        comp_ids = spec_ids
+    else:
+        assert resolve_comp_id in ['sum_spectra', 'max_score']
 
-    inorm = np.array([1./np.linalg.norm(mzi[1]**intensity_power) for mzi in mzis])
-    cnorm = np.array([mzi.shape[1]**.5/np.linalg.norm(np.ones_like(mzi[1])) for mzi in mzis])
+        if resolve_comp_id == 'max_score':
+            assert 'implemented' == False
+        elif resolve_comp_id == 'sum_spectra':
+            if any([not isinstance(id,int) for id in spec_ids]):
+                comp_ids = rankmin(comp_ids)
+        comp_ids = comp_ids[spec_ids]
 
     mzis = np.concatenate(mzis, axis=1)
     mzis[1] = mzis[1]**intensity_power
+
+    inorm = np.array([1./np.linalg.norm(mzis[1,comp_ids==cid]) for cid in np.unique(comp_ids)])
+    cnorm = np.array([(comp_ids==cid).sum()**.5/np.linalg.norm(np.ones_like(mzis[1,comp_ids==cid])) for cid in np.unique(comp_ids)])
+
+
     mz_bin_idxs = np.rint(mzis[0]/bin_width).astype(complex)
     nl_bin_idxs = np.rint(np.asarray(pmzs)[spec_ids]/bin_width) - mz_bin_idxs
     mz_bin_idxs = mz_bin_idxs + nl_bin_idxs*(0+1j)
@@ -88,8 +104,8 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
     shift = -mz_bin_idxs.imag.min().astype(int)
 
     # Convert binned mzs/nls and normalized intensities/counts into coordinate list format
-    ic =  sp.coo_matrix((np.concatenate([inorm[spec_ids]*mzis[1], cnorm[spec_ids]*(0+1j)]),
-                        (np.concatenate([spec_ids, spec_ids]),
+    ic =  sp.coo_matrix((np.concatenate([inorm[comp_ids]*mzis[1], cnorm[comp_ids]*(0+1j)]),
+                        (np.concatenate([comp_ids, comp_ids]),
                          np.concatenate([mz_bin_idxs.real.astype(int)+shift,
                                          mz_bin_idxs.imag.astype(int)+shift]))),
                          dtype=complex)
@@ -101,10 +117,10 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
          'shift':shift,
          'bin_width': bin_width,
          'intensity_power': intensity_power,
-        'metadata':metadata}
-    
+         'metadata': metadata}
+
     if trim_empty:
-        S['blanks'] = np.setdiff1d(np.arange(spec_ids[-1]+1),kept)
+        S['blanks'] = np.setdiff1d(np.arange(spec_ids[-1]+1), kept)
 
     return S
 
@@ -181,10 +197,12 @@ biochem_masses = [0.,      # Self
 # Comparing Sparse Spectra
 ############################
 
-def score_sparse_spectra(query, ref, tolerance=0.01, mass_diffs=[0], react_steps=1):
+def score_sparse_spectra(qry, ref, kind=['mzi', 'nli', 'mzc', 'nlc'], tolerance=0.01, mass_diffs=[0], react_steps=1):
     """
-    score/match/compare two sparse mass spectra
+    score/match/compare query vs reference sparse mass spectra
 
+    kind, list[str]
+        score [mz/nl][i/c] matrices only
     tolerance, float
         tolerance in mz from mass_diffs for networking ions
     mass_diffs, listlike of floats
@@ -194,9 +212,9 @@ def score_sparse_spectra(query, ref, tolerance=0.01, mass_diffs=[0], react_steps
         specified number of reaction steps
 
     returns:
-        query vs ref scores, scipy.sparse.csr_matrix
+        qry vs ref scores, scipy.sparse.csr_matrix
     """
-    
+
     def expand_sparse_spectra(spectra, shape=None, networked=False):
         # Expand complex valued sparse matrices into [mz/nl][i/c] matrices
         if networked:
@@ -217,34 +235,34 @@ def score_sparse_spectra(query, ref, tolerance=0.01, mass_diffs=[0], react_steps
              'nlc': sp.coo_matrix((c, (nl, nl_spec_ids)), dtype=int,   copy=False)}
 
         return expanded_spectra
-    
-    ordered = ref['ic'].size < query['ic'].size
-    
-    network_kernel(query if ordered else ref, tolerance, mass_diffs, react_steps)
-    
-    e_q = expand_sparse_spectra(query, networked=ordered)
-    e_r = expand_sparse_spectra(ref, networked=not ordered)
 
-    query_shift = query['shift_net'] if ordered else query['shift']
+    ordered = ref['ic'].size < qry['ic'].size
+
+    network_kernel(qry if ordered else ref, tolerance, mass_diffs, react_steps)
+
+    eq = expand_sparse_spectra(qry, networked=ordered)
+    er = expand_sparse_spectra(ref, networked=not ordered)
+
+    qry_shift = qry['shift_net'] if ordered else qry['shift']
     ref_shift = ref['shift'] if ordered else ref['shift_net']
 
     # Return score/matches matrices for mzs/nls
-    query_vs_ref = {}
-    for k in set(e_q.keys()) & set(e_r.keys()):
-        vq, vr = e_q[k].T, e_r[k]
+    qry_vs_ref = {}
+    for k in kind:
+        vq, vr = eq[k].T, er[k]
 
-        if query_shift < ref_shift:
-            vq = sp.hstack([sp.coo_matrix((vq.shape[0], ref_shift-query_shift), dtype=vq.dtype), vq], format='csr', dtype=vq.dtype)
-        if ref_shift < query_shift:
-            vr = sp.vstack([sp.coo_matrix((query_shift-ref_shift, vr.shape[1]), dtype=vr.dtype), vr], format='csc', dtype=vr.dtype)
+        if qry_shift < ref_shift:
+            vq = sp.hstack([sp.coo_matrix((vq.shape[0], ref_shift-qry_shift), dtype=vq.dtype), vq], format='csr', dtype=vq.dtype)
+        if ref_shift < qry_shift:
+            vr = sp.vstack([sp.coo_matrix((qry_shift-ref_shift, vr.shape[1]), dtype=vr.dtype), vr], format='csc', dtype=vr.dtype)
 
         max_mz = max(vq.shape[1],vr.shape[0])
         vq.resize((vq.shape[0],max_mz))
         vr.resize((max_mz,vr.shape[1]))
 
-        query_vs_ref[k] = vq.tocsr().dot(vr.tocsc()) #will set query as rows and ref as columns
+        qry_vs_ref[k] = vq.tocsr().dot(vr.tocsc()) #will set qry as rows and ref as columns
 
-    return query_vs_ref
+    return qry_vs_ref
 
 #######################
 # Mass Spectra Loading
@@ -282,6 +300,18 @@ def open_sparse_msms_file(in_file):
         logging.error('Unsupported file type: {}'.format(os.path.splitext(in_file)[-1]))
         raise IOError
 
+############
+# Utilities
+############
+'''
+https://stackoverflow.com/questions/39059371/can-numpys-argsort-give-equal-element-the-same-rank
+Warren Weckesser
+'''
+def rankmin(x):
+    u, inv, counts = np.unique(x, return_inverse=True, return_counts=True)
+    csum = np.zeros_like(counts)
+    csum[1:] = counts[:-1].cumsum()
+    return csum[inv]
 
 #########################
 # Command Line Interface
