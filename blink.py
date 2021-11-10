@@ -12,6 +12,8 @@ import scipy.sparse as sp
 from scipy.sparse.linalg import norm
 import pandas as pd
 from pyteomics import mgf
+import pymzml
+import networkx as nx
 
 ###########################
 # Mass Spectra Transforms
@@ -102,7 +104,7 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
          'bin_width': bin_width,
          'intensity_power': intensity_power,
         'metadata':metadata}
-
+    
     if trim_empty:
         S['blanks'] = np.setdiff1d(np.arange(spec_ids[-1]+1),kept)
 
@@ -181,12 +183,10 @@ biochem_masses = [0.,      # Self
 # Comparing Sparse Spectra
 ############################
 
-def score_sparse_spectra(qry, ref, kind=['mzi', 'nli', 'mzc', 'nlc'], tolerance=0.01, mass_diffs=[0], react_steps=1):
+def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1):
     """
     score/match/compare two sparse mass spectra
 
-    kind, list[str]
-        Score [mz/nl][i/c] matrices only
     tolerance, float
         tolerance in mz from mass_diffs for networking ions
     mass_diffs, listlike of floats
@@ -196,62 +196,62 @@ def score_sparse_spectra(qry, ref, kind=['mzi', 'nli', 'mzc', 'nlc'], tolerance=
         specified number of reaction steps
 
     returns:
-        qry vs ref scores, scipy.sparse.csr_matrix
+        S1 vs S2 scores, scipy.sparse.csr_matrix
     """
-
-    def expand_sparse_spectra(spectra, shape=None, networked=False):
-        # Expand complex valued sparse matrices into [mz/nl][i/c] matrices
+    # Expand complex valued sparse matrices into [mz/nl][i/c] matrices
+    def expand_sparse_spectra(S, shape=None, networked=False):
         if networked:
             networked = '_net'
         else:
             networked = ''
 
-        mz = spectra['mz'+networked][spectra['ic'+networked].real>0]
-        nl = spectra['mz'+networked][spectra['ic'+networked].imag>0]
-        mz_spec_ids = spectra['spec_ids'+networked][spectra['ic'+networked].real>0]
-        nl_spec_ids = spectra['spec_ids'+networked][spectra['ic'+networked].imag>0]
-        i =  spectra['ic'+networked].real[spectra['ic'+networked].real>0]
-        c =  spectra['ic'+networked].imag[spectra['ic'+networked].imag>0]
+        mz = S['mz'+networked][S['ic'+networked].real>0]
+        nl = S['mz'+networked][S['ic'+networked].imag>0]
+        mz_spec_ids = S['spec_ids'+networked][S['ic'+networked].real>0]
+        nl_spec_ids = S['spec_ids'+networked][S['ic'+networked].imag>0]
+        i =  S['ic'+networked].real[S['ic'+networked].real>0]
+        c =  S['ic'+networked].imag[S['ic'+networked].imag>0]
 
-        expanded_spectra = {'mzi': sp.coo_matrix((i, (mz, mz_spec_ids)), dtype=float, copy=False),
+        E = {'mzi': sp.coo_matrix((i, (mz, mz_spec_ids)), dtype=float, copy=False),
              'nli': sp.coo_matrix((i, (nl, nl_spec_ids)), dtype=float, copy=False),
              'mzc': sp.coo_matrix((c, (mz, mz_spec_ids)), dtype=int,   copy=False),
              'nlc': sp.coo_matrix((c, (nl, nl_spec_ids)), dtype=int,   copy=False)}
 
-        return expanded_spectra
+        return E
 
-    ordered = ref['ic'].size < qry['ic'].size
+    ordered = S1['ic'].size < S2['ic'].size
 
-    network_kernel(qry if ordered else ref, tolerance, mass_diffs, react_steps)
+    network_kernel(S1 if ordered else S2, tolerance, mass_diffs, react_steps)
 
-    eq = expand_sparse_spectra(qry, networked=ordered)
-    er = expand_sparse_spectra(ref, networked=not ordered)
+    E1 = expand_sparse_spectra(S1, networked=ordered)
+    E2 = expand_sparse_spectra(S2, networked=not ordered)
 
-    qry_shift = qry['shift_net'] if ordered else qry['shift']
-    ref_shift = ref['shift'] if ordered else ref['shift_net']
+    S1_shift = S1['shift_net'] if ordered else S1['shift']
+    S2_shift = S2['shift'] if ordered else S2['shift_net']
 
     # Return score/matches matrices for mzs/nls
-    qry_vs_ref = {}
-    for k in kind:
-        vq, vr = eq[k].T, er[k]
+    S12 = {}
+    for k in set(E1.keys()) & set(E2.keys()):
+        v1, v2 = E1[k].T, E2[k]
 
-        if qry_shift < ref_shift:
-            vq = sp.hstack([sp.coo_matrix((vq.shape[0], ref_shift-qry_shift), dtype=vq.dtype), vq], format='csr', dtype=vq.dtype)
-        if ref_shift < qry_shift:
-            vr = sp.vstack([sp.coo_matrix((qry_shift-ref_shift, vr.shape[1]), dtype=vr.dtype), vr], format='csc', dtype=vr.dtype)
+        if S1_shift < S2_shift:
+            v1 = sp.hstack([sp.coo_matrix((v1.shape[0], S2_shift-S1_shift), dtype=v1.dtype), v1], format='csr', dtype=v1.dtype)
+        if S2_shift < S1_shift:
+            v2 = sp.vstack([sp.coo_matrix((S1_shift-S2_shift, v2.shape[1]), dtype=v2.dtype), v2], format='csc', dtype=v2.dtype)
 
-        max_mz = max(vq.shape[1],vr.shape[0])
-        vq.resize((vq.shape[0],max_mz))
-        vr.resize((max_mz,vr.shape[1]))
+        max_mz = max(v1.shape[1],v2.shape[0])
+        v1.resize((v1.shape[0],max_mz))
+        v2.resize((max_mz,v2.shape[1]))
 
-        qry_vs_ref[k] = vq.tocsr().dot(vr.tocsc()) #will set qry as rows and ref as columns
+        S12[k] = v1.tocsr().dot(v2.tocsc())
 
-    return qry_vs_ref
+    return S12
 
 #######################
 # Mass Spectra Loading
 #######################
 
+    
 def read_mzml(filename):
     """
     Takes in the full path to an mzml file
@@ -330,6 +330,7 @@ def read_mzml(filename):
         df.rename(columns={'mz':'precursor_mz'},inplace=True)
         df.reset_index(inplace=True,drop=True)
     return df
+
 
 def read_mgf(in_file):
     msms_df = []
