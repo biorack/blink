@@ -12,8 +12,6 @@ import scipy.sparse as sp
 from scipy.sparse.linalg import norm
 import pandas as pd
 from pyteomics import mgf
-import pymzml
-import networkx as nx
 
 ###########################
 # Mass Spectra Transforms
@@ -49,9 +47,7 @@ def remove_duplicate_ions(mzis, min_diff=0.002):
 
     return mzis
 
-def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5,
-                       trim_empty=False, remove_duplicates=False,
-                       metadata=None):
+def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_empty=False, remove_duplicates=False,metadata=None):
     """
     converts a list of 2xM mass spectrum vectors (mzis) and pmzs into a dict-based sparse matrix of [mz/nl][i/c] components
 
@@ -80,12 +76,11 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5,
 
     spec_ids = np.concatenate([[i]*mzi.shape[1] for i,mzi in enumerate(mzis)]).astype(int)
 
+    inorm = np.array([1./np.linalg.norm(mzi[1]**intensity_power) for mzi in mzis])
+    cnorm = np.array([mzi.shape[1]**.5/np.linalg.norm(np.ones_like(mzi[1])) for mzi in mzis])
+
     mzis = np.concatenate(mzis, axis=1)
     mzis[1] = mzis[1]**intensity_power
-
-    inorm = np.array([1./np.linalg.norm(mzis[1,spec_ids==sp_id]) for sp_id in np.unique(spec_ids)])
-    cnorm = np.array([(spec_ids==sp_id).sum()**.5/np.linalg.norm(np.ones_like(mzis[1,spec_ids==sp_id])) for sp_id in np.unique(spec_ids)])
-
     mz_bin_idxs = np.rint(mzis[0]/bin_width).astype(complex)
     nl_bin_idxs = np.rint(np.asarray(pmzs)[spec_ids]/bin_width) - mz_bin_idxs
     mz_bin_idxs = mz_bin_idxs + nl_bin_idxs*(0+1j)
@@ -106,10 +101,10 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5,
          'shift':shift,
          'bin_width': bin_width,
          'intensity_power': intensity_power,
-         'metadata': metadata}
+        'metadata':metadata}
 
     if trim_empty:
-        S['blanks'] = np.setdiff1d(np.arange(spec_ids[-1]+1), kept)
+        S['blanks'] = np.setdiff1d(np.arange(spec_ids[-1]+1),kept)
 
     return S
 
@@ -188,10 +183,10 @@ biochem_masses = [0.,      # Self
 
 def score_sparse_spectra(qry, ref, kind=['mzi', 'nli', 'mzc', 'nlc'], tolerance=0.01, mass_diffs=[0], react_steps=1):
     """
-    score/match/compare query vs reference sparse mass spectra
+    score/match/compare two sparse mass spectra
 
     kind, list[str]
-        score [mz/nl][i/c] matrices only
+        Score [mz/nl][i/c] matrices only
     tolerance, float
         tolerance in mz from mass_diffs for networking ions
     mass_diffs, listlike of floats
@@ -257,86 +252,6 @@ def score_sparse_spectra(qry, ref, kind=['mzi', 'nli', 'mzc', 'nlc'], tolerance=
 # Mass Spectra Loading
 #######################
 
-    
-def read_mzml(filename):
-    """
-    Takes in the full path to an mzml file
-    
-    For files with MS2, returns spectra, precursor m/z, intensity,
-    and retention time
-    
-    For files with MS^n, returns the above plus relationships to the
-    spectrum collection and what the particular precursor was.
-    
-    returns a dataframe that can go into the downstream processes.
-    """
-    def make_spectra(tuple_spectrum):
-        mzs = []
-        intensities = []
-        for m,i in tuple_spectrum:
-            mzs.append(m)
-            intensities.append(i)
-        np_spectrum = np.asarray([mzs,intensities])
-        return np_spectrum
-
-    precision_dict = {}
-    for i in range(100):
-        precision_dict[i] = 1e-5
-
-    run = pymzml.run.Reader(filename, MS_precisions=precision_dict)
-    spectra = list(run)
-
-    df = []
-    for s in spectra:
-        if s.ms_level>=2:
-            for precursor_dict in s.selected_precursors:
-                data = {'id':s.ID,
-                        'ms_level':s.ms_level,
-                        'rt':s.scan_time_in_minutes(),
-                        'spectra':s.peaks('centroided')}
-                if precursor_dict['precursor id'] is not None:
-                    for k in precursor_dict.keys():
-                        data[k] = precursor_dict[k]
-                        # print(k,precursor_dict[k])
-                df.append(data)
-    df = pd.DataFrame(df)
-    df.dropna(subset=['precursor id'],inplace=True)
-
-    df['spectra'] = df['spectra'].apply(make_spectra)
-    df['id'] = df['id'].astype(int)
-    df['precursor id'] = df['precursor id'].astype(int)
-
-    if df['ms_level'].max()>2:
-        G=nx.from_pandas_edgelist(df, source='precursor id', target='id')
-        # get the collection of spectra
-        sub_graph_indices=list(nx.connected_components(G))
-        # expand to [<spec. collection>,<id>]
-        sub_graph_indices = [(i, v) for i,d in enumerate(sub_graph_indices) for k, v in enumerate(d)]
-        sub_graph_indices = pd.DataFrame(sub_graph_indices,columns=['spectrum_collection','id'])
-        df = pd.merge(df,sub_graph_indices,left_on='id',right_on='id',how='left')
-        prec_mz_df = df[df['ms_level']==2].copy()
-        prec_mz_df.rename(columns={'mz':'root_precursor_mz',
-                                   'i':'root_precursor_intensity',
-                                   'rt':'root_precursor_rt'},inplace=True)
-        df.drop(columns=['i'],inplace=True)
-        df.rename(columns={'mz':'precursor_mz'},inplace=True)
-        df = pd.merge(df,
-                      prec_mz_df[['spectrum_collection',
-                                  'root_precursor_mz',
-                                  'root_precursor_intensity','root_precursor_rt']],
-                      left_on='spectrum_collection',
-                      right_on='spectrum_collection')
-        df.rename(columns={},inplace=True)
-        # df.sort_values('rt',inplace=True)
-        # df.drop_duplicates('rt',inplace=True)
-        df.reset_index(inplace=True,drop=True)
-        # df.head(30)
-    else:
-        df.drop(columns=['precursor id'],inplace=True)
-        df.rename(columns={'mz':'precursor_mz'},inplace=True)
-        df.reset_index(inplace=True,drop=True)
-    return df
-
 def read_mgf(in_file):
     msms_df = []
     with mgf.MGF(in_file) as reader:
@@ -369,18 +284,6 @@ def open_sparse_msms_file(in_file):
         logging.error('Unsupported file type: {}'.format(os.path.splitext(in_file)[-1]))
         raise IOError
 
-############
-# Utilities
-############
-'''
-https://stackoverflow.com/questions/39059371/can-numpys-argsort-give-equal-element-the-same-rank
-Warren Weckesser
-'''
-def rankmin(x):
-    u, inv, counts = np.unique(x, return_inverse=True, return_counts=True)
-    csum = np.zeros_like(counts)
-    csum[1:] = counts[:-1].cumsum()
-    return csum[inv]
 
 #########################
 # Command Line Interface
