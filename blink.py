@@ -48,7 +48,6 @@ def remove_duplicate_ions(mzis, min_diff=0.002):
     return mzis
 
 def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5,
-                       comp_ids=None, resolve_comp_id='sum_spectra',
                        trim_empty=False, remove_duplicates=False,
                        metadata=None):
     """
@@ -78,24 +77,12 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5,
         mzis = remove_duplicate_ions(mzis,min_diff=bin_width*2)
 
     spec_ids = np.concatenate([[i]*mzi.shape[1] for i,mzi in enumerate(mzis)]).astype(int)
-    if comp_ids is None:
-        comp_ids = spec_ids
-    else:
-        assert resolve_comp_id in ['sum_spectra', 'max_score']
-
-        if resolve_comp_id == 'max_score':
-            assert 'implemented' == False
-        elif resolve_comp_id == 'sum_spectra':
-            if any([not isinstance(id,int) for id in spec_ids]):
-                comp_ids = rankmin(comp_ids)
-        comp_ids = comp_ids[spec_ids]
 
     mzis = np.concatenate(mzis, axis=1)
     mzis[1] = mzis[1]**intensity_power
 
-    inorm = np.array([1./np.linalg.norm(mzis[1,comp_ids==cid]) for cid in np.unique(comp_ids)])
-    cnorm = np.array([(comp_ids==cid).sum()**.5/np.linalg.norm(np.ones_like(mzis[1,comp_ids==cid])) for cid in np.unique(comp_ids)])
-
+    inorm = np.array([1./np.linalg.norm(mzis[1,spec_ids==sp_id]) for sp_id in np.unique(spec_ids)])
+    cnorm = np.array([(spec_ids==sp_id).sum()**.5/np.linalg.norm(np.ones_like(mzis[1,spec_ids==sp_id])) for sp_id in np.unique(spec_ids)])
 
     mz_bin_idxs = np.rint(mzis[0]/bin_width).astype(complex)
     nl_bin_idxs = np.rint(np.asarray(pmzs)[spec_ids]/bin_width) - mz_bin_idxs
@@ -104,8 +91,8 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5,
     shift = -mz_bin_idxs.imag.min().astype(int)
 
     # Convert binned mzs/nls and normalized intensities/counts into coordinate list format
-    ic =  sp.coo_matrix((np.concatenate([inorm[comp_ids]*mzis[1], cnorm[comp_ids]*(0+1j)]),
-                        (np.concatenate([comp_ids, comp_ids]),
+    ic =  sp.coo_matrix((np.concatenate([inorm[spec_ids]*mzis[1], cnorm[spec_ids]*(0+1j)]),
+                        (np.concatenate([spec_ids, spec_ids]),
                          np.concatenate([mz_bin_idxs.real.astype(int)+shift,
                                          mz_bin_idxs.imag.astype(int)+shift]))),
                          dtype=complex)
