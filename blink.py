@@ -244,7 +244,8 @@ def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1):
         v2.resize((max_mz,v2.shape[1]))
 
         S12[k] = v1.tocsr().dot(v2.tocsc())
-
+    S12['S1_metadata'] = S1['metadata']
+    S12['S2_metadata'] = S2['metadata']
     return S12
 
 #######################
