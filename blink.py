@@ -246,7 +246,107 @@ def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1):
         S12[k] = v1.tocsr().dot(v2.tocsc())
     S12['S1_metadata'] = S1['metadata']
     S12['S2_metadata'] = S2['metadata']
+    
     return S12
+
+
+def compute_network_score(S12):
+    S12['network_score'] = S12['mzi'].maximum(S12['nli']).tocoo()
+    S12['network_matches'] = S12['mzc'].maximum(S12['nlc']).tocoo()
+    return S12
+    
+    
+def filter_hits(S12,good_score=0.5,min_matches=5,good_matches=20,calc_network_score=True):
+    """
+    filter mzi and nli scores
+    filter mzc and nlc counts
+    
+    returns filtered score and network score as coo matrices
+    
+    good_score = 0.5 #remove hits unless count >= good_matches
+    min_matches = 5 # completely ignore any hits with less than this many matches
+    good_matches = 20 #remove hits unless score >= good_score
+    
+    """
+
+    #why use maximum? If you want either or
+    idx = S12['mzi']>=good_score
+    idx = idx.multiply(S12['mzc']>=min_matches)
+    idx = idx.maximum(S12['mzc']>=good_matches)
+    S12['mzi'] = S12['mzi'].multiply(idx).tocoo()
+    S12['mzc'] = S12['mzc'].multiply(idx).tocoo()
+
+    if calc_network_score==True:
+        idx = S12['nli']>=good_score
+        idx = idx.multiply(S12['nlc']>=min_matches)
+        idx = idx.maximum(S12['nlc']>=good_matches)
+        S12['nli'] = S12['nli'].multiply(idx).tocoo()
+        S12['nlc'] = S12['nlc'].multiply(idx).tocoo()
+
+        S12 = compute_network_score(S12)
+    
+    return S12
+
+def get_topk_blink_matrix(D,k=5,score_col=5,query_col=1):
+    """
+    sort by score_col and query_col
+    get top k for each query_col entry
+    
+    returns filtered blink matrix
+    """
+    idx = np.argsort(D[:,score_col])[::-1] #sort in descending order by blink score
+    D = D[idx,:]
+    idx = np.argsort(D[:,query_col]) # sort in ascending order by query number
+    D = D[idx,:]
+
+    #return indices of first instance of each query number
+    u,u_idx = np.unique(D[:,query_col],return_index=True)
+
+    #for each query number get k next best hits
+    hits = []
+    for i,idx in enumerate(u_idx[:-1]):
+        if (u_idx[i+1]-idx)>=k: #check the >=
+            hits.append(np.arange(k)+idx)
+        else:
+            hits.append(np.arange(u_idx[i+1]-idx)+idx)
+    hits = np.concatenate(hits)
+    D = D[hits,:]
+    return D
+
+
+def create_blink_matrix_format(S12,calc_network_score):
+    """
+    """
+    idx_mz = np.ravel_multi_index((S12['mzi'].row,S12['mzi'].col),S12['mzi'].shape)
+    if calc_network_score==True:
+        idx_nl = np.ravel_multi_index((S12['nli'].row,S12['nli'].col),S12['nli'].shape)
+        idx_network = np.ravel_multi_index((S12['network_score'].row,S12['network_score'].col),S12['network_score'].shape)
+        idx = np.unique(np.concatenate([idx_mz,idx_nl]))
+        r,c = np.unravel_index(idx,S12['mzi'].shape)
+    else:
+        idx = idx_mz
+        r,c = np.unravel_index(idx,S12['mzi'].shape)
+
+
+    M = np.zeros((len(idx),3),dtype='>i4')
+    M[:,0] = idx
+    M[:,1] = r #query
+    M[:,2] = c #reference
+
+    V = np.zeros((len(idx),6),dtype='float')
+    temp_indices = np.in1d(idx, idx_mz).nonzero()
+    V[temp_indices,0] = S12['mzi'].data
+    V[temp_indices,1] = S12['mzc'].data
+    if calc_network_score==True:
+        temp_indices = np.in1d(idx, idx_nl).nonzero()
+        V[temp_indices,2] = S12['nli'].data
+        V[temp_indices,3] = S12['nlc'].data
+        temp_indices = np.in1d(idx, idx_network).nonzero()
+        V[temp_indices,4] = S12['network_score'].data
+        V[temp_indices,5] = S12['network_matches'].data
+
+    return np.concatenate([M,V],axis=1)
+
 
 #######################
 # Mass Spectra Loading
