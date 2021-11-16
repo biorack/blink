@@ -251,8 +251,8 @@ def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1):
 
 
 def compute_network_score(S12):
-    S12['network_score'] = S12['mzi'].maximum(S12['nli']).tocoo()
-    S12['network_matches'] = S12['mzc'].maximum(S12['nlc']).tocoo()
+    S12['network_score'] = S12['mzi'].maximum(S12['nli'])
+    S12['network_matches'] = S12['mzc'].maximum(S12['nlc'])
     return S12
     
     
@@ -268,36 +268,51 @@ def filter_hits(S12,good_score=0.5,min_matches=5,good_matches=20,calc_network_sc
     good_matches = 20 #remove hits unless score >= good_score
     
     """
-
-    #why use maximum? If you want either or
-    idx = S12['mzi']>=good_score
-    idx = idx.multiply(S12['mzc']>=min_matches)
-    idx = idx.maximum(S12['mzc']>=good_matches)
-    S12['mzi'] = S12['mzi'].multiply(idx).tocoo()
-    S12['mzc'] = S12['mzc'].multiply(idx).tocoo()
-
+    
+    # We always calculate it, but not filter on it unless user wants it
+    S12 = compute_network_score(S12)
     if calc_network_score==True:
-        idx = S12['nli']>=good_score
-        idx = idx.multiply(S12['nlc']>=min_matches)
-        idx = idx.maximum(S12['nlc']>=good_matches)
-        S12['nli'] = S12['nli'].multiply(idx).tocoo()
-        S12['nlc'] = S12['nlc'].multiply(idx).tocoo()
+        #filter on blink network score
+        idx = S12['network_score']>=good_score
+        idx = idx.multiply(S12['network_matches']>=min_matches)
+        idx = idx.maximum(S12['network_matches']>=good_matches)
+        S12['network_score'] = S12['network_score'].multiply(idx).tocoo()
+        S12['network_matches'] = S12['network_matches'].multiply(idx).tocoo()
+        # S12['mzi'] = S12['mzi'].multiply(idx).tocoo()
+        # S12['mzc'] = S12['mzc'].multiply(idx).tocoo()
+        # S12['nli'] = S12['nli'].multiply(idx).tocoo()
+        # S12['nli'] = S12['nli'].multiply(idx).tocoo()
+    else:
+        # filter on blink score
+        idx = S12['mzi']>=good_score
+        idx = idx.multiply(S12['mzc']>=min_matches)
+        idx = idx.maximum(S12['mzc']>=good_matches)
+        # S12['network_score'] = S12['network_score'].multiply(idx).tocoo()
+        # S12['network_matches'] = S12['network_matches'].multiply(idx).tocoo()
+        S12['mzi'] = S12['mzi'].multiply(idx).tocoo()
+        S12['mzc'] = S12['mzc'].multiply(idx).tocoo()
+        # S12['nli'] = S12['nli'].multiply(idx).tocoo()
+        # S12['nli'] = S12['nli'].multiply(idx).tocoo()
 
-        S12 = compute_network_score(S12)
     
     return S12
 
-def get_topk_blink_matrix(D,k=5,score_col=5,query_col=1):
+def get_topk_blink_matrix(D,k=5,score_col=4,query_col=1):
     """
     sort by score_col and query_col
     get top k for each query_col entry
     
     returns filtered blink matrix
     """
+    
+    # Do a quick hand calc to make sure this is working:
+    # https://docs.scipy.org/doc/numpy-1.10.0/reference/generated/numpy.ndarray.sort.html
     idx = np.argsort(D[:,score_col])[::-1] #sort in descending order by blink score
     D = D[idx,:]
     idx = np.argsort(D[:,query_col]) # sort in ascending order by query number
     D = D[idx,:]
+
+
 
     #return indices of first instance of each query number
     u,u_idx = np.unique(D[:,query_col],return_index=True)
@@ -317,35 +332,31 @@ def get_topk_blink_matrix(D,k=5,score_col=5,query_col=1):
 def create_blink_matrix_format(S12,calc_network_score):
     """
     """
-    idx_mz = np.ravel_multi_index((S12['mzi'].row,S12['mzi'].col),S12['mzi'].shape)
+
     if calc_network_score==True:
-        idx_nl = np.ravel_multi_index((S12['nli'].row,S12['nli'].col),S12['nli'].shape)
-        idx_network = np.ravel_multi_index((S12['network_score'].row,S12['network_score'].col),S12['network_score'].shape)
-        idx = np.unique(np.concatenate([idx_mz,idx_nl]))
-        r,c = np.unravel_index(idx,S12['mzi'].shape)
+        # idx_nl = np.ravel_multi_index((S12['nli'].row,S12['nli'].col),S12['nli'].shape)
+        idx = np.ravel_multi_index((S12['network_score'].row,S12['network_score'].col),S12['network_score'].shape)
+        # idx = np.unique(np.concatenate([idx_mz,idx_nl]))
+        r,c = np.unravel_index(idx,S12['network_score'].shape)
     else:
-        idx = idx_mz
+        idx = np.ravel_multi_index((S12['mzi'].row,S12['mzi'].col),S12['mzi'].shape)
         r,c = np.unravel_index(idx,S12['mzi'].shape)
 
-
-    M = np.zeros((len(idx),3),dtype='>i4')
+    M = np.zeros((len(idx),5))#,dtype='>i4')
     M[:,0] = idx
     M[:,1] = r #query
     M[:,2] = c #reference
-
-    V = np.zeros((len(idx),6),dtype='float')
-    temp_indices = np.in1d(idx, idx_mz).nonzero()
-    V[temp_indices,0] = S12['mzi'].data
-    V[temp_indices,1] = S12['mzc'].data
+    print(M.shape)
     if calc_network_score==True:
-        temp_indices = np.in1d(idx, idx_nl).nonzero()
-        V[temp_indices,2] = S12['nli'].data
-        V[temp_indices,3] = S12['nlc'].data
-        temp_indices = np.in1d(idx, idx_network).nonzero()
-        V[temp_indices,4] = S12['network_score'].data
-        V[temp_indices,5] = S12['network_matches'].data
+        idx = np.in1d(idx, idx).nonzero()
+        M[idx,3] = S12['network_score'].data
+        M[idx,4] = S12['network_matches'].data
+    else:
+        # temp_indices = np.in1d(idx, idx_mz).nonzero()
+        M[idx,3] = S12['mzi'].data
+        M[idx,4] = S12['mzc'].data
 
-    return np.concatenate([M,V],axis=1)
+    return M
 
 
 #######################
