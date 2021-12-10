@@ -18,6 +18,17 @@ import networkx as nx
 ###########################
 # Mass Spectra Transforms
 ###########################
+def filter_spectra(mzis,pmzs,pmz_delta=0.05):
+    """
+    remove zero intensities to keep the sparse arrays from breaking
+    remove ion pairs greater than precursor mz to lines things up without wrap around
+    """
+    cleaned_mzis = []
+    for i,mzi in enumerate(mzis):
+        idx = np.argwhere((mzi[0]<(pmzs[i]+pmz_delta)) & (mzi[1]>0)).flatten()
+        cleaned_mzis.append(mzi[:,idx])
+    return cleaned_mzis
+
 
 def remove_duplicate_ions(mzis, min_diff=0.002):
     """
@@ -69,6 +80,8 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
          'bin_width',
          'intensity_power'}
     """
+    mzis = filter_spectra(mzis,pmzs)
+    
     if trim_empty:
         kept, mzis = np.array([[idx,mzi] for idx,mzi
                                 in enumerate(mzis)
@@ -86,6 +99,8 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
     mz_bin_idxs = np.rint(mzis[0]/bin_width).astype(complex)
     nl_bin_idxs = np.rint(np.asarray(pmzs)[spec_ids]/bin_width) - mz_bin_idxs
     mz_bin_idxs = mz_bin_idxs + nl_bin_idxs*(0+1j)
+    # nl_bin_idxs = mz_bin_idxs + nl_bin_idxs
+    # nl_bin_idxs = nl_bin_idxs.astype(complex)
 
     shift = -mz_bin_idxs.imag.min().astype(int)
 
@@ -307,10 +322,11 @@ def get_topk_blink_matrix(D,k=5,score_col=4,query_col=1):
     
     # Do a quick hand calc to make sure this is working:
     # https://docs.scipy.org/doc/numpy-1.10.0/reference/generated/numpy.ndarray.sort.html
-    idx = np.argsort(D[:,score_col])[::-1] #sort in descending order by blink score
-    D = D[idx,:]
-    idx = np.argsort(D[:,query_col]) # sort in ascending order by query number
-    D = D[idx,:]
+    D = D[np.lexsort((D[:, query_col], -D[:, score_col])),:]
+    # idx = np.argsort(D[:,score_col])[::-1] #sort in descending order by blink score
+    # D = D[idx,:]
+    # idx = np.argsort(D[:,query_col]) # sort in ascending order by query number
+    # D = D[idx,:]
 
 
 
@@ -346,16 +362,18 @@ def create_blink_matrix_format(S12,calc_network_score):
     M[:,0] = idx
     M[:,1] = r #query
     M[:,2] = c #reference
-    print(M.shape)
     if calc_network_score==True:
         idx = np.in1d(idx, idx).nonzero()
         M[idx,3] = S12['network_score'].data
         M[idx,4] = S12['network_matches'].data
     else:
-        # temp_indices = np.in1d(idx, idx_mz).nonzero()
+        idx = np.in1d(idx, idx).nonzero()
         M[idx,3] = S12['mzi'].data
         M[idx,4] = S12['mzc'].data
-
+    
+    #remove self connections
+    M = M[M[:,1]!=M[:,2]]
+    
     return M
 
 
