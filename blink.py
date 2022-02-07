@@ -21,11 +21,10 @@ import networkx as nx
 def filter_spectra(mzis,pmzs,pmz_delta=0.05):
     """
     remove zero intensities to keep the sparse arrays from breaking
-    remove ion pairs greater than precursor mz to lines things up without wrap around
     """
     cleaned_mzis = []
     for i,mzi in enumerate(mzis):
-        idx = np.argwhere((mzi[0]<(pmzs[i]+pmz_delta)) & (mzi[1]>0)).flatten()
+        idx = np.argwhere(mzi[1]>0).flatten()
         cleaned_mzis.append(mzi[:,idx])
     return cleaned_mzis
 
@@ -81,7 +80,7 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
          'intensity_power'}
     """
     mzis = filter_spectra(mzis,pmzs)
-    
+
     if trim_empty:
         kept, mzis = np.array([[idx,mzi] for idx,mzi
                                 in enumerate(mzis)
@@ -119,7 +118,7 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
          'bin_width': bin_width,
          'intensity_power': intensity_power,
         'metadata':metadata}
-    
+
     if trim_empty:
         S['blanks'] = np.setdiff1d(np.arange(spec_ids[-1]+1),kept)
 
@@ -261,7 +260,7 @@ def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1):
         S12[k] = v1.tocsr().dot(v2.tocsc())
     S12['S1_metadata'] = S1['metadata']
     S12['S2_metadata'] = S2['metadata']
-    
+
     return S12
 
 
@@ -269,21 +268,21 @@ def compute_network_score(S12):
     S12['network_score'] = S12['mzi'].maximum(S12['nli'])
     S12['network_matches'] = S12['mzc'].maximum(S12['nlc'])
     return S12
-    
-    
+
+
 def filter_hits(S12,good_score=0.5,min_matches=5,good_matches=20,calc_network_score=True):
     """
     filter mzi and nli scores
     filter mzc and nlc counts
-    
+
     returns filtered score and network score as coo matrices
-    
+
     good_score = 0.5 #remove hits unless count >= good_matches
     min_matches = 5 # completely ignore any hits with less than this many matches
     good_matches = 20 #remove hits unless score >= good_score
-    
+
     """
-    
+
     # We always calculate it, but not filter on it unless user wants it
     S12 = compute_network_score(S12)
     if calc_network_score==True:
@@ -309,17 +308,17 @@ def filter_hits(S12,good_score=0.5,min_matches=5,good_matches=20,calc_network_sc
         # S12['nli'] = S12['nli'].multiply(idx).tocoo()
         # S12['nli'] = S12['nli'].multiply(idx).tocoo()
 
-    
+
     return S12
 
 def get_topk_blink_matrix(D,k=5,score_col=4,query_col=1):
     """
     sort by score_col and query_col
     get top k for each query_col entry
-    
+
     returns filtered blink matrix
     """
-    
+
     # Do a quick hand calc to make sure this is working:
     # https://docs.scipy.org/doc/numpy-1.10.0/reference/generated/numpy.ndarray.sort.html
     D = D[np.lexsort((D[:, query_col], -D[:, score_col])),:]
@@ -370,10 +369,10 @@ def create_blink_matrix_format(S12,calc_network_score):
         idx = np.in1d(idx, idx).nonzero()
         M[idx,3] = S12['mzi'].data
         M[idx,4] = S12['mzc'].data
-    
+
     #remove self connections
     M = M[M[:,1]!=M[:,2]]
-    
+
     return M
 
 
@@ -381,17 +380,17 @@ def create_blink_matrix_format(S12,calc_network_score):
 # Mass Spectra Loading
 #######################
 
-    
+
 def read_mzml(filename):
     """
     Takes in the full path to an mzml file
-    
+
     For files with MS2, returns spectra, precursor m/z, intensity,
     and retention time
-    
+
     For files with MS^n, returns the above plus relationships to the
     spectrum collection and what the particular precursor was.
-    
+
     returns a dataframe that can go into the downstream processes.
     """
     def make_spectra(tuple_spectrum):
