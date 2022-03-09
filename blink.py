@@ -417,7 +417,7 @@ def read_mzml(filename):
                 data = {'id':s.ID,
                         'ms_level':s.ms_level,
                         'rt':s.scan_time_in_minutes(),
-                        'spectra':s.peaks('centroided')}
+                        'spectrum':s.peaks('centroided')}
                 if precursor_dict['precursor id'] is not None:
                     for k in precursor_dict.keys():
                         data[k] = precursor_dict[k]
@@ -426,7 +426,7 @@ def read_mzml(filename):
     df = pd.DataFrame(df)
     df.dropna(subset=['precursor id'],inplace=True)
 
-    df['spectra'] = df['spectra'].apply(make_spectra)
+    df['spectrum'] = df['spectrum'].apply(make_spectra)
     df['id'] = df['id'].astype(int)
     df['precursor id'] = df['precursor id'].astype(int)
 
@@ -481,6 +481,9 @@ def open_msms_file(in_file):
     if '.mgf' in in_file:
         logging.info('Processing {}'.format(os.path.basename(in_file)))
         return read_mgf(in_file)
+    if '.mzml' in in_file.lower():
+        logging.info('Processing {}'.format(os.path.basename(in_file)))
+        return read_mzml(in_file)
     else:
         logging.error('Unsupported file type: {}'.format(os.path.splitext(in_file)[-1]))
         raise IOError
