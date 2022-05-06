@@ -87,11 +87,17 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
                                 if mzi.size>0], dtype=object).T
     if remove_duplicates:
         mzis = remove_duplicate_ions(mzis,min_diff=bin_width*2)
-
+    
     spec_ids = np.concatenate([[i]*mzi.shape[1] for i,mzi in enumerate(mzis)]).astype(int)
 
     inorm = np.array([1./np.linalg.norm(mzi[1]**intensity_power) for mzi in mzis])
     cnorm = np.array([mzi.shape[1]**.5/np.linalg.norm(np.ones_like(mzi[1])) for mzi in mzis])
+    num_ions = [mzi.shape[1] for mzi in mzis]
+
+    if metadata is None:
+        metadata = {}
+    for i,m in enumerate(mzis):
+        metadata[i]['num_ions'] = num_ions[i]
 
     mzis = np.concatenate(mzis, axis=1)
     mzis[1] = mzis[1]**intensity_power
@@ -497,6 +503,117 @@ def open_sparse_msms_file(in_file):
         raise IOError
 
 
+        
+#########################
+# TOPOLOGY FILTERS. Most From GNPS Quickstart Github Repo
+#########################
+
+def filter_component_additive(G, max_component_size,edge_score='score'):
+    if max_component_size == 0:
+        return
+
+    all_edges = list(G.edges(data=True))
+    G.remove_edges_from(list(G.edges))
+
+    all_edges = sorted(all_edges, key=lambda x: x[2][edge_score], reverse=True)
+    counter = 0
+    for i,edge in enumerate(all_edges):
+        G.add_edges_from([edge])
+        largest_cc = max(nx.connected_components(G), key=len)
+        if len(largest_cc) > max_component_size:
+            G.remove_edge(edge[0], edge[1])
+        counter +=1
+        if counter==1000:
+            print(i,len(list(G.edges(data=True))))
+            counter=0
+        
+def filter_top_k(G, top_k,edge_score='score'):
+    print("Filter Top_K", top_k)
+    #Keeping only the top K scoring edges per node
+    print("Starting Numer of Edges", len(G.edges()))
+
+    node_cutoff_score = {}
+    for node in G.nodes():
+        node_edges = G.edges((node), data=True)
+        node_edges = sorted(node_edges, key=lambda edge: edge[2][edge_score], reverse=True)
+
+        edges_to_delete = node_edges[top_k:]
+        edges_to_keep = node_edges[:top_k]
+
+        if len(edges_to_keep) == 0:
+            continue
+
+        node_cutoff_score[node] = edges_to_keep[-1][2][edge_score]
+
+        #print("DELETE", edges_to_delete)
+
+
+        #for edge_to_remove in edges_to_delete:
+        #    G.remove_edge(edge_to_remove[0], edge_to_remove[1])
+
+
+    #print("After Top K", len(G.edges()))
+    #Doing this for each pair, makes sure they are in each other's top K
+    edge_to_remove = []
+    for edge in G.edges(data=True):
+        cosine_score = edge[2][edge_score]
+        threshold1 = node_cutoff_score[edge[0]]
+        threshold2 = node_cutoff_score[edge[1]]
+
+        if cosine_score < threshold1 or cosine_score < threshold2:
+            edge_to_remove.append(edge)
+
+    for edge in edge_to_remove:
+        G.remove_edge(edge[0], edge[1])
+
+    print("After Top K Mutual", len(G.edges()))
+
+    
+#########################
+# Convenient Task Runner for Most Common Use Cases
+#########################
+def get_blink_hits(query_filename,ref,calc_network_score=True,
+                  min_matches=5,good_matches=20,good_score=0.5,precursor_match=5):
+    spectra_df = open_msms_file(query_filename)
+    if 'spectrum' in spectra_df.columns:
+        query = discretize_spectra(spectra_df['spectrum'].tolist(),pmzs=spectra_df['precursor_mz'].tolist(),
+                                     remove_duplicates=False,metadata=spectra_df.drop(columns=['spectrum']).to_dict(orient='records'))
+
+        S12 = score_sparse_spectra(query, ref)
+        S12 = filter_hits(S12,min_matches=min_matches,good_matches=good_matches,good_score=good_score,calc_network_score=calc_network_score)
+        D = create_blink_matrix_format(S12,calc_network_score)
+        df = pd.DataFrame(D,columns=['raveled_index','query','ref','score','matches'])
+
+        df = pd.merge(df,pd.DataFrame(S12['S1_metadata']).add_suffix('_query'),left_on='query',right_index=True,how='left')
+        df = pd.merge(df,pd.DataFrame(list(S12['S2_metadata'])).add_suffix('_ref'),left_on='ref',right_index=True,how='left')
+
+        # best to do a check that precursor mz is the actual name of attribute or there will be trouble
+        if ('precursor_mz_query' in df.columns) & ('precursor_mz_ref' in df.columns):
+            df['precursor_ppm_diff'] = 1e6 * abs(df['precursor_mz_query'] - df['precursor_mz_ref'])/df['precursor_mz_query']
+            if precursor_match is not False:
+                idx = df['precursor_ppm_diff']<precursor_match
+                df = df[idx]
+        else:
+            print('you can not filter by precursor mz since it is not there')
+            
+        if ('num_ions_query' in df.columns) & ('num_ions_ref' in df.columns):
+            df['jaccard_matches'] = df['matches'] / ((df['num_ions_query']+df['num_ions_ref'])-df['matches'])
+            df['overlap_matches'] = df['matches'] / df[['num_ions_query','num_ions_ref']].min(axis=1)
+            if precursor_match is not False:
+                idx = df['precursor_ppm_diff']<precursor_match
+                df = df[idx]
+        else:
+            print('you can not filter by precursor mz since it is not there')
+            
+        df['score_rank'] = df.groupby("query")["score"].rank("dense", ascending=False)
+        df['matches_rank'] = df.groupby("query")["matches"].rank("dense", ascending=False)
+        if 'jaccard_matches' in df.columns:
+            df['jaccard_matches_rank'] = df.groupby("query")["jaccard_matches"].rank("dense", ascending=False)
+
+        return df
+    else:
+        return None
+    
 #########################
 # Command Line Interface
 #########################
