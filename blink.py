@@ -130,6 +130,13 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
 
     return S
 
+def maximum_entropy_normalization(y):
+    #MaximumEntropyNormalization   Normalize Data using principle of maximum entropy.
+    # n=1/(1+exp(-(y-mean(y))/std(y)));
+    m=y.mean()
+    s=y.std()
+    n=1/(1+np.exp(-1*(y-m)/s))
+    return n
 
 ##########
 # Kernel
@@ -613,7 +620,38 @@ def get_blink_hits(query_filename,ref,calc_network_score=True,
         return df
     else:
         return None
+
+#########################
+# Convenience Plotting Functions
+#########################
+
+def make_mirror_plot(r,q,figsize=(12,6),mz_tol=0.01,fontsize=20,grid=True):
+    """
+    Make a mirror plot
+    You should normalize the spectra before passing to this.
+    q = query spectrum np.array([mzs,intensities])
+    r = reference spectrum np.array([mzs,intensities])
+    returns figure and axes handles
+    """
     
+    fig,ax = plt.subplots(figsize=figsize)
+    
+    dd = abs(np.subtract(r[0][None,:], q[0][:, None],))<mz_tol
+
+    ax.vlines(q[0],q[1]*0,q[1],'grey',linewidth=2)
+    idx = dd.any(axis=1)
+    ax.vlines(q[0][idx],q[1][idx]*0,q[1][idx],'black',linewidth=4)
+
+    ax.vlines(r[0],r[1]*0,-1*r[1],'grey',linewidth=2)
+    idx = dd.any(axis=0)
+    ax.vlines(r[0][idx],r[1][idx]*0,-1*r[1][idx],'black',linewidth=4)
+    ax.set_ylabel('Normalized intensity (au)',fontsize=fontsize)
+    ax.set_xlabel('m/z',fontsize=fontsize)
+    ax.tick_params(axis='both', which='major', labelsize=(fontsize-2))
+    if grid==True:
+        ax.grid()
+    return fig,ax
+
 #########################
 # Command Line Interface
 #########################
