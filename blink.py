@@ -15,6 +15,7 @@ from pyteomics import mgf
 import pymzml
 import networkx as nx
 
+import matplotlib.pyplot as plt
 ###########################
 # Mass Spectra Transforms
 ###########################
@@ -633,6 +634,7 @@ def make_mirror_plot(r,q,figsize=(12,6),mz_tol=0.01,fontsize=20,grid=True):
     r = reference spectrum np.array([mzs,intensities])
     returns figure and axes handles
     """
+
     
     fig,ax = plt.subplots(figsize=figsize)
     
