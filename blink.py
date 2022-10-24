@@ -302,8 +302,10 @@ def filter_hits(S12,good_score=0.5,min_matches=5,good_matches=20,calc_network_sc
     if calc_network_score==True:
         #filter on blink network score
         idx = S12['network_score']>=good_score
-        idx = idx.multiply(S12['network_matches']>=min_matches)
-        idx = idx.maximum(S12['network_matches']>=good_matches)
+        if min_matches is not None:
+            idx = idx.multiply(S12['network_matches']>=min_matches)
+        if good_matches is not None:
+            idx = idx.maximum(S12['network_matches']>=good_matches)
         S12['network_score'] = S12['network_score'].multiply(idx).tocoo()
         S12['network_matches'] = S12['network_matches'].multiply(idx).tocoo()
         # S12['mzi'] = S12['mzi'].multiply(idx).tocoo()
@@ -313,8 +315,10 @@ def filter_hits(S12,good_score=0.5,min_matches=5,good_matches=20,calc_network_sc
     else:
         # filter on blink score
         idx = S12['mzi']>=good_score
-        idx = idx.multiply(S12['mzc']>=min_matches)
-        idx = idx.maximum(S12['mzc']>=good_matches)
+        if min_matches is not None:
+            idx = idx.multiply(S12['mzc']>=min_matches)
+        if good_matches is not None:
+            idx = idx.maximum(S12['mzc']>=good_matches)
         # S12['network_score'] = S12['network_score'].multiply(idx).tocoo()
         # S12['network_matches'] = S12['network_matches'].multiply(idx).tocoo()
         S12['mzi'] = S12['mzi'].multiply(idx).tocoo()
@@ -580,13 +584,19 @@ def filter_top_k(G, top_k,edge_score='score'):
 #########################
 # Convenient Task Runner for Most Common Use Cases
 #########################
-def get_blink_hits(query_filename,ref,calc_network_score=True,
+def get_blink_hits(query,ref,calc_network_score=True,
                   min_matches=5,good_matches=20,good_score=0.5,precursor_match=5):
-    spectra_df = open_msms_file(query_filename)
-    if 'spectrum' in spectra_df.columns:
-        query = discretize_spectra(spectra_df['spectrum'].tolist(),pmzs=spectra_df['precursor_mz'].tolist(),
-                                     remove_duplicates=False,metadata=spectra_df.drop(columns=['spectrum']).to_dict(orient='records'))
+    if isinstance(query, str):
+        query = open_msms_file(query)
 
+    if 'spectrum' in query.columns:
+        if isinstance(query, pd.DataFrame):
+            query = discretize_spectra(query['spectrum'].tolist(),pmzs=query['precursor_mz'].tolist(),
+                                         remove_duplicates=False,metadata=query.drop(columns=['spectrum']).to_dict(orient='records'))
+        if isinstance(ref, pd.DataFrame):
+            ref = discretize_spectra(ref['spectrum'].tolist(),pmzs=ref['precursor_mz'].tolist(),
+                                         remove_duplicates=False,metadata=ref.drop(columns=['spectrum']).to_dict(orient='records'))
+            
         S12 = score_sparse_spectra(query, ref)
         S12 = filter_hits(S12,min_matches=min_matches,good_matches=good_matches,good_score=good_score,calc_network_score=calc_network_score)
         D = create_blink_matrix_format(S12,calc_network_score)
@@ -594,6 +604,20 @@ def get_blink_hits(query_filename,ref,calc_network_score=True,
 
         df = pd.merge(df,pd.DataFrame(S12['S1_metadata']).add_suffix('_query'),left_on='query',right_index=True,how='left')
         df = pd.merge(df,pd.DataFrame(list(S12['S2_metadata'])).add_suffix('_ref'),left_on='ref',right_index=True,how='left')
+        
+        #  TO DO!!!!
+        #
+        # If precursor_match is not False then there are ways 100x faster than this to deal with the filter.
+        # The most important thing is to do it right AFTER SCORE_SPARSE_SPECTRA
+        # 
+        # This works
+        # def f(a,b,c):
+        #     out = ne.evaluate('C * abs(A+B)<0.01',{'A':a[...,None],'B':b,'C':c})
+        #     return out
+        # a = [m['precursor_mz'] for m in query['metadata']]
+        # a = np.asarray(a)
+        # out = f(a,a,blink_score['mzi'].todense())
+
 
         # best to do a check that precursor mz is the actual name of attribute or there will be trouble
         if ('precursor_mz_query' in df.columns) & ('precursor_mz_ref' in df.columns):
@@ -607,11 +631,8 @@ def get_blink_hits(query_filename,ref,calc_network_score=True,
         if ('num_ions_query' in df.columns) & ('num_ions_ref' in df.columns):
             df['jaccard_matches'] = df['matches'] / ((df['num_ions_query']+df['num_ions_ref'])-df['matches'])
             df['overlap_matches'] = df['matches'] / df[['num_ions_query','num_ions_ref']].min(axis=1)
-            if precursor_match is not False:
-                idx = df['precursor_ppm_diff']<precursor_match
-                df = df[idx]
         else:
-            print('you can not filter by precursor mz since it is not there')
+            print('you can not calculate overlap matches since it is not there')
             
         df['score_rank'] = df.groupby("query")["score"].rank("dense", ascending=False)
         df['matches_rank'] = df.groupby("query")["matches"].rank("dense", ascending=False)
@@ -626,7 +647,7 @@ def get_blink_hits(query_filename,ref,calc_network_score=True,
 # Convenience Plotting Functions
 #########################
 
-def make_mirror_plot(r,q,figsize=(12,6),mz_tol=0.01,fontsize=20,grid=True):
+def make_mirror_plot(r,q,figsize=(12,6),mz_tol=0.01,color='black',match_color='red',fontsize=20,grid=True,ax=None,fig=None,vshade=None):
     """
     Make a mirror plot
     You should normalize the spectra before passing to this.
@@ -634,25 +655,29 @@ def make_mirror_plot(r,q,figsize=(12,6),mz_tol=0.01,fontsize=20,grid=True):
     r = reference spectrum np.array([mzs,intensities])
     returns figure and axes handles
     """
-
-    
-    fig,ax = plt.subplots(figsize=figsize)
-    
+    # return_fig = False
+    if ax is None:
+        fig,ax = plt.subplots(figsize=figsize)
+        # return_fig = True
+        
     dd = abs(np.subtract(r[0][None,:], q[0][:, None],))<mz_tol
 
-    ax.vlines(q[0],q[1]*0,q[1],'grey',linewidth=2)
+    ax.vlines(q[0],q[1]*0,q[1],color,alpha=0.6,linewidth=2)
     idx = dd.any(axis=1)
-    ax.vlines(q[0][idx],q[1][idx]*0,q[1][idx],'black',linewidth=4)
+    ax.vlines(q[0][idx],q[1][idx]*0,q[1][idx],match_color,linewidth=2)
 
-    ax.vlines(r[0],r[1]*0,-1*r[1],'grey',linewidth=2)
+    ax.vlines(r[0],r[1]*0,-1*r[1],color,alpha=0.6,linewidth=2)
     idx = dd.any(axis=0)
-    ax.vlines(r[0][idx],r[1][idx]*0,-1*r[1][idx],'black',linewidth=4)
+    ax.vlines(r[0][idx],r[1][idx]*0,-1*r[1][idx],match_color,linewidth=2)
     ax.set_ylabel('Normalized intensity (au)',fontsize=fontsize)
     ax.set_xlabel('m/z',fontsize=fontsize)
     ax.tick_params(axis='both', which='major', labelsize=(fontsize-2))
+    if vshade is not None:
+        ax.axvline(vshade[0],linewidth=vshade[1],alpha=vshade[2],color=vshade[3])
     if grid==True:
         ax.grid()
-    return fig,ax
+    # if return_fig==True
+    # return fig,ax
 
 #########################
 # Command Line Interface
