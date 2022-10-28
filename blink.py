@@ -29,7 +29,6 @@ def filter_spectra(mzis,pmzs,pmz_delta=0.05):
         cleaned_mzis.append(mzi[:,idx])
     return cleaned_mzis
 
-
 def remove_duplicate_ions(mzis, min_diff=0.002):
     """
     remove peaks from a list of 2xM mass spectrum vectors (mzis) that are within min_diff
@@ -60,7 +59,7 @@ def remove_duplicate_ions(mzis, min_diff=0.002):
 
     return mzis
 
-def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_empty=False, remove_duplicates=False,metadata=None):
+def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_empty=False, remove_duplicates=False, metadata=None, calc_network_score=True):
     """
     converts a list of 2xM mass spectrum vectors (mzis) and pmzs into a dict-based sparse matrix of [mz/nl][i/c] components
 
@@ -80,51 +79,55 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
          'bin_width',
          'intensity_power'}
     """
-    mzis = filter_spectra(mzis,pmzs)
+    mzis = filter_spectra(mzis,pmzs) 
 
     if trim_empty:
-        kept, mzis = np.array([[idx,mzi] for idx,mzi
-                                in enumerate(mzis)
-                                if mzi.size>0], dtype=object).T
+        kept, mzis = np.array([[idx,mzi] for idx,mzi in enumerate(mzis) if mzi.size>0], dtype=object).T
     if remove_duplicates:
         mzis = remove_duplicate_ions(mzis,min_diff=bin_width*2)
     
     spec_ids = np.concatenate([[i]*mzi.shape[1] for i,mzi in enumerate(mzis)]).astype(int)
 
     inorm = np.array([1./np.linalg.norm(mzi[1]**intensity_power) for mzi in mzis])
-    cnorm = np.array([mzi.shape[1]**.5/np.linalg.norm(np.ones_like(mzi[1])) for mzi in mzis])
+    cnorm = np.ones(len(mzis))
     num_ions = [mzi.shape[1] for mzi in mzis]
 
     if metadata is None:
-        metadata = {}
+        metadata = [{}] * len(mzis)
+        
     for i,m in enumerate(mzis):
         metadata[i]['num_ions'] = num_ions[i]
 
     mzis = np.concatenate(mzis, axis=1)
-    mzis[1] = mzis[1]**intensity_power
-    mz_bin_idxs = np.rint(mzis[0]/bin_width).astype(complex)
-    nl_bin_idxs = np.rint(np.asarray(pmzs)[spec_ids]/bin_width) - mz_bin_idxs
-    mz_bin_idxs = mz_bin_idxs + nl_bin_idxs*(0+1j)
-    # nl_bin_idxs = mz_bin_idxs + nl_bin_idxs
-    # nl_bin_idxs = nl_bin_idxs.astype(complex)
+    
+    mzis[1] = mzis[1]**intensity_power 
+    normalized_intensities = inorm[spec_ids]*mzis[1]
+    normalized_counts = cnorm[spec_ids].astype(int)
+    
+    mz_bins = np.rint(mzis[0]/bin_width).astype(int)
+    
+    if calc_network_score == True:
+        nl_bins = (np.rint(np.asarray(pmzs)[spec_ids]/bin_width) - mz_bins).astype(int)
+        shift = -nl_bins.min().astype(int) #to remove negative numbers and zeros from the bins 
+        nl_bins = nl_bins+shift
+        
+    else:
+        shift = 0
 
-    shift = -mz_bin_idxs.imag.min().astype(int)
+    mz_bins = mz_bins+shift
 
-    # Convert binned mzs/nls and normalized intensities/counts into coordinate list format
-    ic =  sp.coo_matrix((np.concatenate([inorm[spec_ids]*mzis[1], cnorm[spec_ids]*(0+1j)]),
-                        (np.concatenate([spec_ids, spec_ids]),
-                         np.concatenate([mz_bin_idxs.real.astype(int)+shift,
-                                         mz_bin_idxs.imag.astype(int)+shift]))),
-                         dtype=complex)
-
-    S = {'ic': ic.data,
-         'spec_ids' : ic.row,
-         'mz': ic.col,
-         'pmz': pmzs,
-         'shift':shift,
-         'bin_width': bin_width,
-         'intensity_power': intensity_power,
+    S = {'i': normalized_intensities,
+        'c': normalized_counts,
+        'spec_ids': spec_ids,
+        'mz': mz_bins,
+        'pmz': pmzs,
+        'shift':shift,
+        'bin_width': bin_width,
+        'intensity_power': intensity_power,
         'metadata':metadata}
+    
+    if calc_network_score == True:
+        S['nl'] = nl_bins
 
     if trim_empty:
         S['blanks'] = np.setdiff1d(np.arange(spec_ids[-1]+1),kept)
@@ -142,7 +145,7 @@ def maximum_entropy_normalization(y):
 ##########
 # Kernel
 ##########
-def network_kernel(S, tolerance=0.01, mass_diffs=[0], react_steps=1):
+def network_kernel(S, tolerance=0.01, mass_diffs=[0], react_steps=1, calc_network_score=True):
     """
     apply network kernel to all mzs/nls in S that are within
     tolerance of any combination of mass_diffs within react_steps
@@ -182,16 +185,20 @@ def network_kernel(S, tolerance=0.01, mass_diffs=[0], react_steps=1):
     # Expand reacted mass_diffs to have a tolerance
     mass_diffs = np.unique(np.sort(react(mass_diffs, react_steps).flatten()))
     mass_diffs = np.add.outer(mass_diffs, np.arange(-bin_num//2+1, bin_num//2+1)).flatten()
+    
+    S['i'] = np.add.outer(S['i'], np.zeros_like(mass_diffs)).flatten()
+    S['c'] = np.add.outer(S['c'], np.zeros_like(mass_diffs)).flatten()
+    S['spec_ids'] = np.add.outer(S['spec_ids'], np.zeros_like(mass_diffs)).flatten()
+    S['mz'] = np.add.outer(S['mz'], mass_diffs).flatten()
+    
+    if calc_network_score == True:
 
-    # Apply kernel by outer summing and flattening low-level sparse matrix data structure
-    S['ic_net'] = np.add.outer(S['ic'], np.zeros_like(mass_diffs, dtype=complex)).flatten()
-    S['spec_ids_net'] = np.add.outer(S['spec_ids'], np.zeros_like(mass_diffs)).flatten()
-    S['mz_net'] =  np.add.outer(S['mz'], mass_diffs).flatten()
-    S['shift_net'] = S['shift']-S['mz_net'].min()
-    S['mz_net'] -= S['mz_net'].min()
-
+        S['nl'] = np.add.outer(S['nl'], mass_diffs).flatten()
+        S['shift'] = S['shift']-S['nl'].min()
+        S['mz'] -= S['nl'].min()
+        S['nl'] -= S['nl'].min()
+        
     return S
-
 
 #####################
 # Biochemical Masses
@@ -206,12 +213,22 @@ biochem_masses = [0.,      # Self
                   78.95851,# PO3
                   31.97207]# S
 
-
 ############################
 # Comparing Sparse Spectra
 ############################
 
-def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1):
+def construct_sparse_matrices(S, calc_network_score=True):
+
+    E = {'mzi': sp.coo_matrix((S['i'], (S['mz'], S['spec_ids'])), dtype=float, copy=False),
+        'mzc': sp.coo_matrix((S['c'], (S['mz'], S['spec_ids'])), dtype=int,   copy=False)}
+    
+    if calc_network_score == True:
+        E['nli'] = sp.coo_matrix((S['i'], (S['nl'], S['spec_ids'])), dtype=float, copy=False)
+        E['nlc'] = sp.coo_matrix((S['c'], (S['nl'], S['spec_ids'])), dtype=int,   copy=False)
+    
+    return E
+
+def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1, calc_network_score=True):
     """
     score/match/compare two sparse mass spectra
 
@@ -227,42 +244,23 @@ def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1):
         S1 vs S2 scores, scipy.sparse.csr_matrix
     """
     # Expand complex valued sparse matrices into [mz/nl][i/c] matrices
-    def expand_sparse_spectra(S, shape=None, networked=False):
-        if networked:
-            networked = '_net'
-        else:
-            networked = ''
+    
+    ordered = S1['c'].size < S2['c'].size
 
-        mz = S['mz'+networked][S['ic'+networked].real>0]
-        nl = S['mz'+networked][S['ic'+networked].imag>0]
-        mz_spec_ids = S['spec_ids'+networked][S['ic'+networked].real>0]
-        nl_spec_ids = S['spec_ids'+networked][S['ic'+networked].imag>0]
-        i =  S['ic'+networked].real[S['ic'+networked].real>0]
-        c =  S['ic'+networked].imag[S['ic'+networked].imag>0]
+    network_kernel(S1 if ordered else S2, tolerance, mass_diffs, react_steps, calc_network_score=calc_network_score)
+    
+    E1 = construct_sparse_matrices(S1, calc_network_score=calc_network_score)
+    E2 = construct_sparse_matrices(S2, calc_network_score=calc_network_score)
 
-        E = {'mzi': sp.coo_matrix((i, (mz, mz_spec_ids)), dtype=float, copy=False),
-             'nli': sp.coo_matrix((i, (nl, nl_spec_ids)), dtype=float, copy=False),
-             'mzc': sp.coo_matrix((c, (mz, mz_spec_ids)), dtype=int,   copy=False),
-             'nlc': sp.coo_matrix((c, (nl, nl_spec_ids)), dtype=int,   copy=False)}
-
-        return E
-
-    ordered = S1['ic'].size < S2['ic'].size
-
-    network_kernel(S1 if ordered else S2, tolerance, mass_diffs, react_steps)
-
-    E1 = expand_sparse_spectra(S1, networked=ordered)
-    E2 = expand_sparse_spectra(S2, networked=not ordered)
-
-    S1_shift = S1['shift_net'] if ordered else S1['shift']
-    S2_shift = S2['shift'] if ordered else S2['shift_net']
+    S1_shift = S1['shift']
+    S2_shift = S2['shift']
 
     # Return score/matches matrices for mzs/nls
     S12 = {}
     for k in set(E1.keys()) & set(E2.keys()):
         v1, v2 = E1[k].T, E2[k]
 
-        if S1_shift < S2_shift:
+        if S1_shift <= S2_shift:
             v1 = sp.hstack([sp.coo_matrix((v1.shape[0], S2_shift-S1_shift), dtype=v1.dtype), v1], format='csr', dtype=v1.dtype)
         if S2_shift < S1_shift:
             v2 = sp.vstack([sp.coo_matrix((S1_shift-S2_shift, v2.shape[1]), dtype=v2.dtype), v2], format='csc', dtype=v2.dtype)
@@ -276,7 +274,6 @@ def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1):
     S12['S2_metadata'] = S2['metadata']
 
     return S12
-
 
 def compute_network_score(S12):
     S12['network_score'] = S12['mzi'].maximum(S12['nli'])
@@ -296,10 +293,9 @@ def filter_hits(S12,good_score=0.5,min_matches=5,good_matches=20,calc_network_sc
     good_matches = 20 #remove hits unless score >= good_score
 
     """
-
-    # We always calculate it, but not filter on it unless user wants it
-    S12 = compute_network_score(S12)
+    
     if calc_network_score==True:
+        S12 = compute_network_score(S12)
         #filter on blink network score
         idx = S12['network_score']>=good_score
         if min_matches is not None:
@@ -325,8 +321,7 @@ def filter_hits(S12,good_score=0.5,min_matches=5,good_matches=20,calc_network_sc
         S12['mzc'] = S12['mzc'].multiply(idx).tocoo()
         # S12['nli'] = S12['nli'].multiply(idx).tocoo()
         # S12['nli'] = S12['nli'].multiply(idx).tocoo()
-
-
+        
     return S12
 
 def get_topk_blink_matrix(D,k=5,score_col=4,query_col=1):
@@ -361,8 +356,7 @@ def get_topk_blink_matrix(D,k=5,score_col=4,query_col=1):
     D = D[hits,:]
     return D
 
-
-def create_blink_matrix_format(S12,calc_network_score):
+def create_blink_matrix_format(S12,calc_network_score=True):
     """
     """
 
@@ -393,11 +387,9 @@ def create_blink_matrix_format(S12,calc_network_score):
 
     return M
 
-
 #######################
 # Mass Spectra Loading
 #######################
-
 
 def read_mzml(filename):
     """
@@ -478,7 +470,6 @@ def read_mzml(filename):
         df.reset_index(inplace=True,drop=True)
     return df
 
-
 def read_mgf(in_file):
     msms_df = []
     with mgf.MGF(in_file) as reader:
@@ -513,8 +504,6 @@ def open_sparse_msms_file(in_file):
     else:
         logging.error('Unsupported file type: {}'.format(os.path.splitext(in_file)[-1]))
         raise IOError
-
-
         
 #########################
 # TOPOLOGY FILTERS. Most From GNPS Quickstart Github Repo
@@ -579,7 +568,6 @@ def filter_top_k(G, top_k,edge_score='score'):
         G.remove_edge(edge[0], edge[1])
 
     print("After Top K Mutual", len(G.edges()))
-
     
 #########################
 # Convenient Task Runner for Most Common Use Cases
@@ -592,14 +580,14 @@ def get_blink_hits(query,ref,calc_network_score=True,
     if 'spectrum' in query.columns:
         if isinstance(query, pd.DataFrame):
             query = discretize_spectra(query['spectrum'].tolist(),pmzs=query['precursor_mz'].tolist(),
-                                         remove_duplicates=False,metadata=query.drop(columns=['spectrum']).to_dict(orient='records'))
+                                         remove_duplicates=False,metadata=query.drop(columns=['spectrum']).to_dict(orient='records'), calc_network_score=calc_network_score)
         if isinstance(ref, pd.DataFrame):
             ref = discretize_spectra(ref['spectrum'].tolist(),pmzs=ref['precursor_mz'].tolist(),
-                                         remove_duplicates=False,metadata=ref.drop(columns=['spectrum']).to_dict(orient='records'))
+                                         remove_duplicates=False,metadata=ref.drop(columns=['spectrum']).to_dict(orient='records'), calc_network_score=calc_network_score)
             
-        S12 = score_sparse_spectra(query, ref)
+        S12 = score_sparse_spectra(query, ref, calc_network_score=calc_network_score)
         S12 = filter_hits(S12,min_matches=min_matches,good_matches=good_matches,good_score=good_score,calc_network_score=calc_network_score)
-        D = create_blink_matrix_format(S12,calc_network_score)
+        D = create_blink_matrix_format(S12,calc_network_score=calc_network_score)
         df = pd.DataFrame(D,columns=['raveled_index','query','ref','score','matches'])
 
         df = pd.merge(df,pd.DataFrame(S12['S1_metadata']).add_suffix('_query'),left_on='query',right_index=True,how='left')
