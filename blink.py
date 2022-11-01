@@ -186,17 +186,18 @@ def network_kernel(S, tolerance=0.01, mass_diffs=[0], react_steps=1, calc_networ
     mass_diffs = np.unique(np.sort(react(mass_diffs, react_steps).flatten()))
     mass_diffs = np.add.outer(mass_diffs, np.arange(-bin_num//2+1, bin_num//2+1)).flatten()
     
-    S['i'] = np.add.outer(S['i'], np.zeros_like(mass_diffs)).flatten()
-    S['c'] = np.add.outer(S['c'], np.zeros_like(mass_diffs)).flatten()
-    S['spec_ids'] = np.add.outer(S['spec_ids'], np.zeros_like(mass_diffs)).flatten()
-    S['mz'] = np.add.outer(S['mz'], mass_diffs).flatten()
+    S['i_net'] = np.add.outer(S['i'], np.zeros_like(mass_diffs)).flatten()
+    S['c_net'] = np.add.outer(S['c'], np.zeros_like(mass_diffs)).flatten()
+    S['spec_ids_net'] = np.add.outer(S['spec_ids'], np.zeros_like(mass_diffs)).flatten()
+    S['mz_net'] = np.add.outer(S['mz'], mass_diffs).flatten()
+    S['shift_net'] = S['shift']
     
     if calc_network_score == True:
 
-        S['nl'] = np.add.outer(S['nl'], mass_diffs).flatten()
-        S['shift'] = S['shift']-S['nl'].min()
-        S['mz'] -= S['nl'].min()
-        S['nl'] -= S['nl'].min()
+        S['nl_net'] = np.add.outer(S['nl'], mass_diffs).flatten()
+        S['shift_net'] = S['shift']-S['nl_net'].min()
+        S['mz_net'] -= S['nl_net'].min()
+        S['nl_net'] -= S['nl_net'].min()
         
     return S
 
@@ -217,14 +218,19 @@ biochem_masses = [0.,      # Self
 # Comparing Sparse Spectra
 ############################
 
-def construct_sparse_matrices(S, calc_network_score=True):
+def construct_sparse_matrices(S, networked=False, calc_network_score=True):
+    
+    if networked:
+        networked = '_net'
+    else:
+        networked = ''
 
-    E = {'mzi': sp.coo_matrix((S['i'], (S['mz'], S['spec_ids'])), dtype=float, copy=False),
-        'mzc': sp.coo_matrix((S['c'], (S['mz'], S['spec_ids'])), dtype=int,   copy=False)}
+    E = {'mzi': sp.coo_matrix((S['i'+networked], (S['mz'+networked], S['spec_ids'+networked])), dtype=float, copy=False),
+        'mzc': sp.coo_matrix((S['c'+networked], (S['mz'+networked], S['spec_ids'+networked])), dtype=int,   copy=False)}
     
     if calc_network_score == True:
-        E['nli'] = sp.coo_matrix((S['i'], (S['nl'], S['spec_ids'])), dtype=float, copy=False)
-        E['nlc'] = sp.coo_matrix((S['c'], (S['nl'], S['spec_ids'])), dtype=int,   copy=False)
+        E['nli'] = sp.coo_matrix((S['i'+networked], (S['nl'+networked], S['spec_ids'+networked])), dtype=float, copy=False)
+        E['nlc'] = sp.coo_matrix((S['c'+networked], (S['nl'+networked], S['spec_ids'+networked])), dtype=int,   copy=False)
     
     return E
 
@@ -249,11 +255,11 @@ def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1, 
 
     network_kernel(S1 if ordered else S2, tolerance, mass_diffs, react_steps, calc_network_score=calc_network_score)
     
-    E1 = construct_sparse_matrices(S1, calc_network_score=calc_network_score)
-    E2 = construct_sparse_matrices(S2, calc_network_score=calc_network_score)
+    E1 = construct_sparse_matrices(S1, networked=ordered, calc_network_score=calc_network_score)
+    E2 = construct_sparse_matrices(S2, networked=not ordered, calc_network_score=calc_network_score)
 
-    S1_shift = S1['shift']
-    S2_shift = S2['shift']
+    S1_shift = S1['shift_net'] if ordered else S1['shift']
+    S2_shift = S2['shift'] if ordered else S2['shift_net']
 
     # Return score/matches matrices for mzs/nls
     S12 = {}
