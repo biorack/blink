@@ -427,6 +427,10 @@ def read_mzml(filename):
 
     df = []
     for s in spectra:
+        
+        if s.ms_level is None:
+            continue
+
         if s.ms_level>=2:
             for precursor_dict in s.selected_precursors:
                 data = {'id':s.ID,
