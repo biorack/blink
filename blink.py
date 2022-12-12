@@ -487,7 +487,8 @@ def read_mgf(in_file):
             d = spectrum['params']
             d['spectrum'] = np.array([spectrum['m/z array'],
                                       spectrum['intensity array']])
-            d['precursor_mz'] = d['pepmass'][0]
+            if 'precursor_mz' not in d:
+                d['precursor_mz'] = d['pepmass'][0]
             msms_df.append(d)
     msms_df = pd.DataFrame(msms_df)
     return msms_df
