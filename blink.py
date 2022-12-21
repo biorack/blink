@@ -93,7 +93,7 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
     num_ions = [mzi.shape[1] for mzi in mzis]
 
     if metadata is None:
-        metadata = [{}] * len(mzis)
+        metadata = [{} for ele in range(len(mzis))]
         
     for i,m in enumerate(mzis):
         metadata[i]['num_ions'] = num_ions[i]
