@@ -489,6 +489,8 @@ def read_mgf(in_file):
                                       spectrum['intensity array']])
             if 'precursor_mz' not in d:
                 d['precursor_mz'] = d['pepmass'][0]
+            else:
+                d['precursor_mz'] = float(d['precursor_mz'])
             msms_df.append(d)
     msms_df = pd.DataFrame(msms_df)
     return msms_df
