@@ -14,3 +14,4 @@ dependencies:
   - rdkit
   - matchms
   - networkx
+  - pymzml
