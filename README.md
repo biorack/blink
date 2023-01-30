@@ -1,6 +1,6 @@
 # BLINK
 
-BLINK (Binned Large Interval Network Kernel) is a Python library for efficiently
+BLINK (Blur-and-Link) is a Python library for efficiently
 networking fragmentation mass spectra by all-by-all cosine scores and number of matching ions
 with allowances for different mz tolerances and combinatorial mass differences.
 
