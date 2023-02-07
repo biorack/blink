@@ -24,7 +24,14 @@ conda env create -f environment.yml
 - pymzml
 - networkx
 
-## Usage
+## Getting Started
+
+```
+Please see for descriptions and usage of primary functions and all optional parameters 
+tutorial/blink_tutorial.ipynb
+```
+
+## Command-line Usage
 
 ```bash
 >> ./blink.py --help
