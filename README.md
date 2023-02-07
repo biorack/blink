@@ -1,25 +1,28 @@
 # BLINK
 
-BLINK (Blur-and-Link) is a Python library for efficiently
-networking fragmentation mass spectra by all-by-all cosine scores and number of matching ions
-with allowances for different mz tolerances and combinatorial mass differences.
+BLINK (Blur-and-Link) is a Python package for efficiently
+generating cosine-based similarity scores and matching ion counts for large numbers of fragmentation mass spectra. Additionally, BLINK contains experimental features that can be used for molecular networking with allowances for combinatorial mass differences.  
+
+![BLINK Flow](blink_workflow.png "BLINK")
 
 ## Installation
 
-Use the package manager [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/index.html) to install environment-base.yml for minimum requirements.
+Use the package manager [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/index.html) to install environment.yml for all BLINK and example notebook requirements.
 
 ```bash
-conda env create -f environment-base.yml
+conda env create -f environment.yml
 ```
 
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/biorack/blink/HEAD)
 
-## Python dependencies
+## Base Python dependencies
 - python3
 - numpy
 - scipy
 - pandas
 - pyteomics
+- pymzml
+- networkx
 
 ## Usage
 
