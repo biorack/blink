@@ -59,7 +59,7 @@ def remove_duplicate_ions(mzis, min_diff=0.002):
 
     return mzis
 
-def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_empty=False, remove_duplicates=False, metadata=None, calc_network_score=True):
+def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_empty=False, remove_duplicates=False, metadata=None, calc_network_score=False):
     """
     converts a list of 2xM mass spectrum vectors (mzis) and pmzs into a dict-based sparse matrix of [mz/nl][i/c] components
 
@@ -156,7 +156,7 @@ def maximum_entropy_normalization(y):
 ##########
 # Kernel
 ##########
-def network_kernel(S, tolerance=0.01, mass_diffs=[0], react_steps=1, calc_network_score=True):
+def network_kernel(S, tolerance=0.01, mass_diffs=[0], react_steps=1, calc_network_score=False):
     """
     apply network kernel to all mzs/nls in S that are within
     tolerance of any combination of mass_diffs within react_steps
@@ -229,7 +229,7 @@ biochem_masses = [0.,      # Self
 # Comparing Sparse Spectra
 ############################
 
-def construct_sparse_matrices(S, networked=False, calc_network_score=True):
+def construct_sparse_matrices(S, networked=False, calc_network_score=False):
     
     if networked:
         networked = '_net'
@@ -245,7 +245,7 @@ def construct_sparse_matrices(S, networked=False, calc_network_score=True):
     
     return E
 
-def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1, calc_network_score=True):
+def score_sparse_spectra(S1, S2, tolerance=0.01, mass_diffs=[0], react_steps=1, calc_network_score=False):
     """
     score/match/compare two sparse mass spectra
 
@@ -298,7 +298,7 @@ def compute_network_score(S12):
     return S12
 
 
-def filter_hits(S12,good_score=0.5,min_matches=5,good_matches=20,calc_network_score=True):
+def filter_hits(S12,good_score=0.5,min_matches=5,good_matches=20,calc_network_score=False):
     """
     filter mzi and nli scores
     filter mzc and nlc counts
@@ -373,7 +373,7 @@ def get_topk_blink_matrix(D,k=5,score_col=4,query_col=1):
     D = D[hits,:]
     return D
 
-def create_blink_matrix_format(S12,calc_network_score=True):
+def create_blink_matrix_format(S12,calc_network_score=False):
     """
     reshape score and matches matrices such that they can be associated with metadata
     """
@@ -597,7 +597,7 @@ def filter_top_k(G, top_k,edge_score='score'):
 #########################
 # Convenient Task Runner for Most Common Use Cases
 #########################
-def get_blink_hits(query,ref,calc_network_score=True,
+def get_blink_hits(query,ref,calc_network_score=False,
                   min_matches=5,good_matches=20,good_score=0.5,precursor_match=5):
     if isinstance(query, str):
         query = open_msms_file(query)
