@@ -68,16 +68,27 @@ def discretize_spectra(mzis, pmzs, bin_width=0.001, intensity_power=0.5, trim_em
             width of bin to use in mz
         intensity_power, float
             power to raise intensity to before normalizing
+        trim_empty, bool
+            remove empty spectra from list
         remove_duplicates, bool
             average mz and intensity over peaks within 2 times bin_width
+        calc_network_score, bool
+            calculate and store neutral loss matrices
 
     returns:
-        {'ic',
+        {'i',
+         'c',
          'spec_ids',
          'mz',
          'pmz',
+         'shift',
          'bin_width',
-         'intensity_power'}
+         'intensity_power',
+          'metadata'}
+          
+          optional:
+          {'nl',
+           'blanks'}
     """
     mzis = filter_spectra(mzis,pmzs) 
 
@@ -364,6 +375,7 @@ def get_topk_blink_matrix(D,k=5,score_col=4,query_col=1):
 
 def create_blink_matrix_format(S12,calc_network_score=True):
     """
+    reshape score and matches matrices such that they can be associated with metadata
     """
 
     if calc_network_score==True:
