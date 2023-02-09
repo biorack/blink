@@ -379,7 +379,7 @@ def create_blink_matrix_format(S12,calc_network_score=False):
     """
 
     if calc_network_score==True:
-        # idx_nl = np.ravel_multi_index((S12['nli'].row,S12['nli'].col),S12['nli'].shape)
+        # idx_nl = np.ravel_multi_index((S12['nli']f,S12['nli'].col),S12['nli'].shape)
         idx = np.ravel_multi_index((S12['network_score'].row,S12['network_score'].col),S12['network_score'].shape)
         # idx = np.unique(np.concatenate([idx_mz,idx_nl]))
         r,c = np.unravel_index(idx,S12['network_score'].shape)
@@ -722,20 +722,20 @@ def arg_parser(parser=None):
                                     help='remove empty spectra when discretizing')
     discretize_options.add_argument('--dedup', action='store_true', default=False, required=False,
                                     help='deduplicate fragment ions within 2 times bin_width')
-    discretize_options.add_argument('-b','--bin_width', type=float, metavar='B', default=.001, required=False,
+    discretize_options.add_argument('-b','--bin_width', type=float, metavar='B', default=0.001, required=False,
                                  help='width of bins in mz')
-    discretize_options.add_argument('-i','--intensity_power', type=float, metavar='I', default=.5, required=False,
+    discretize_options.add_argument('-i','--intensity_power', type=float, metavar='I', default=0.5, required=False,
                                  help='power to raise intensites to in when scoring')
 
     #Compute options
     compute_options = parser.add_argument_group()
-    compute_options.add_argument('-t','--tolerance', type=float, metavar='T', default=.01, required=False,
+    compute_options.add_argument('-t','--tolerance', type=float, metavar='T', default=0.01, required=False,
                                  help='maximum tolerance in mz for fragment ions to match')
     compute_options.add_argument('-d','--mass_diffs', type=float, metavar='D', nargs='*', default=[0], required=False,
                               help='mass diffs to network')
     compute_options.add_argument('-r','--react_steps', type=int, metavar='R', default=1, required=False,
                               help='recursively combine mass_diffs within number of reaction steps')
-    compute_options.add_argument('-s','--min_score', type=float, default=.4, metavar='S', required=False,
+    compute_options.add_argument('-s','--min_score', type=float, default=0.4, metavar='S', required=False,
                                  help='minimum score to include in output')
     compute_options.add_argument('-m','--min_matches', type=int, default=3, metavar='M', required=False,
                                  help='minimum matches to include in output')
@@ -847,10 +847,12 @@ def main():
                 sys.exit(1)
 
         start = timer()
+
         S12 = score_sparse_spectra(S1, S2,
                                    mass_diffs=args.mass_diffs,
                                    react_steps=args.react_steps,
                                    tolerance=args.tolerance)
+
         end = timer()
         logging.info('Score Time: {} seconds'.format(end-start))
 
@@ -863,25 +865,27 @@ def main():
             if 'nlc' in S12.keys():
                 keep_idx = keep_idx.maximum(S12['nlc'] >= args.min_matches)
 
-            for k in S12.keys():
-                S12[k] = S12[k].multiply(keep_idx).tocoo()
+            S12['mzi'] = S12['mzi'].multiply(keep_idx).tocoo()
+            S12['mzc'] = S12['mzc'].multiply(keep_idx).tocoo()
+
         else:
-            for k in S12.keys():
-                S12[k] = S12[k].tocoo()
+
+            S12['mzi'] = S12['mzi'].tocoo()
+            S12['mzc'] = S12['mzc'].tocoo()
 
         if args.fast_format:
             write_sparse_msms_file(out_loc+'_scores.npz', S12)
         else:
-            out_df = pd.concat([pd.Series(S12[k].data, name=k,
-                                          index=list(zip(S12[k].col.tolist(),
-                                                         S12[k].row.tolist())))
-                                for k in S12.keys()], axis=1)
+
+            mzi_df = pd.Series(S12['mzi'].data, name='mzi', index=list(zip(S12['mzi'].col.tolist(), S12['mzi'].row.tolist())))
+            mzc_df = pd.Series(S12['mzc'].data, name='mzc', index=list(zip(S12['mzc'].col.tolist(), S12['mzc'].row.tolist())))
+            out_df = pd.concat([mzi_df, mzc_df], axis=1)
 
             out_df.index.names = ['/'.join([str(args.tolerance),
                                             ','.join([str(d) for d in args.mass_diffs]),
                                             str(args.react_steps),
                                             str(args.min_score),
-                                            str(args.min_matches)]),'']
+                                            str(args.min_matches)])]
 
             out_df.to_csv(out_loc+'.tab', index=True, sep='\t', columns = sorted(out_df.columns,key=lambda c:c[::-1])[::-1])
 
