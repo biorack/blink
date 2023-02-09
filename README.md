@@ -1,7 +1,7 @@
 # BLINK
 
 BLINK (Blur-and-Link) is a Python package for efficiently
-generating cosine-based similarity scores and matching ion counts for large numbers of fragmentation mass spectra. Additionally, BLINK contains experimental features that can be used for molecular networking with allowances for combinatorial mass differences.  
+generating cosine-based similarity scores and matching ion counts for large numbers of fragmentation mass spectra.   
 
 ![BLINK Flow](blink_workflow.png "BLINK")
 
