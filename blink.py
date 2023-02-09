@@ -598,7 +598,7 @@ def filter_top_k(G, top_k,edge_score='score'):
 # Convenient Task Runner for Most Common Use Cases
 #########################
 def get_blink_hits(query,ref,calc_network_score=False,
-                  min_matches=5,good_matches=20,good_score=0.5,precursor_match=5):
+                  min_matches=5,good_matches=20,good_score=0.5,precursor_match=5, tolerance=0.01):
     if isinstance(query, str):
         query = open_msms_file(query)
 
@@ -610,7 +610,7 @@ def get_blink_hits(query,ref,calc_network_score=False,
             ref = discretize_spectra(ref['spectrum'].tolist(),pmzs=ref['precursor_mz'].tolist(),
                                          remove_duplicates=False,metadata=ref.drop(columns=['spectrum']).to_dict(orient='records'), calc_network_score=calc_network_score)
             
-        S12 = score_sparse_spectra(query, ref, calc_network_score=calc_network_score)
+        S12 = score_sparse_spectra(query, ref, tolerance=tolerance, calc_network_score=calc_network_score)
         S12 = filter_hits(S12,min_matches=min_matches,good_matches=good_matches,good_score=good_score,calc_network_score=calc_network_score)
         D = create_blink_matrix_format(S12,calc_network_score=calc_network_score)
         df = pd.DataFrame(D,columns=['raveled_index','query','ref','score','matches'])
