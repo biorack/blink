@@ -1,6 +1,9 @@
 import numpy as np
 import pandas as pd
+import os
+import logging
 
+from io import _read_mzml, _read_mgf 
 from spectral_normalization import _normalize_spectra
 from matrix_manipulation import _build_matrices, _build_matrices_for_network
 from scoring import _score_sparse_matrices, _score_mass_diffs, _stack_dense
@@ -8,6 +11,29 @@ from scoring import _score_sparse_matrices, _score_mass_diffs, _stack_dense
 #########################
 # Core Functionality
 #########################
+
+def open_msms_file(in_file):
+    if '.mgf' in in_file:
+        logging.info('Processing {}'.format(os.path.basename(in_file)))
+        return _read_mgf(in_file)
+    if '.mzml' in in_file.lower():
+        logging.info('Processing {}'.format(os.path.basename(in_file)))
+        return _read_mzml(in_file)
+    else:
+        logging.error('Unsupported file type: {}'.format(os.path.splitext(in_file)[-1]))
+        raise IOError
+
+def open_sparse_msms_file(in_file):
+    if '.npz' in in_file:
+        logging.info('Processing {}'.format(os.path.basename(in_file)))
+        with np.load(in_file, mmap_mode='w+',allow_pickle=True) as S:
+            return dict(S)
+    else:
+        logging.error('Unsupported file type: {}'.format(os.path.splitext(in_file)[-1]))
+        raise IOError
+
+def write_sparse_msms_file(out_file, S):
+    np.savez_compressed(out_file, **S)
 
 def discretize_spectra(s1_df:pd.DataFrame, s2_df:pd.DataFrame, tolerance: float=0.01, bin_width: float=0.001, intensity_power: float=0.5, mass_diffs: list=[0], 
                         network_score: bool=False, associate_metadata: bool=True, trim_empty: bool=False, remove_duplicates: bool=False) -> dict:

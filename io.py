@@ -1,13 +1,10 @@
 import numpy as np
 import pandas as pd
-import os
 from pyteomics import mgf
 import networkx as nx
 import pymzml
-import logging
 
-
-def read_mzml(mzml_path: str) -> pd.DataFrame:
+def _read_mzml(mzml_path: str) -> pd.DataFrame:
     """parses a given mzml file from path and returns a pandas DataFrame containing data
 
     For files with MS2, returns spectra, precursor m/z, intensity,
@@ -83,7 +80,7 @@ def read_mzml(mzml_path: str) -> pd.DataFrame:
 
     return df
 
-def read_mgf(mgf_path: str) -> pd.DataFrame:
+def _read_mgf(mgf_path: str) -> pd.DataFrame:
     msms_df = []
     with mgf.MGF(mgf_path) as reader:
         for spectrum in reader:
@@ -97,26 +94,3 @@ def read_mgf(mgf_path: str) -> pd.DataFrame:
             msms_df.append(d)
     msms_df = pd.DataFrame(msms_df)
     return msms_df
-
-def write_sparse_msms_file(out_file, S):
-    np.savez_compressed(out_file, **S)
-
-def open_msms_file(in_file):
-    if '.mgf' in in_file:
-        logging.info('Processing {}'.format(os.path.basename(in_file)))
-        return read_mgf(in_file)
-    if '.mzml' in in_file.lower():
-        logging.info('Processing {}'.format(os.path.basename(in_file)))
-        return read_mzml(in_file)
-    else:
-        logging.error('Unsupported file type: {}'.format(os.path.splitext(in_file)[-1]))
-        raise IOError
-
-def open_sparse_msms_file(in_file):
-    if '.npz' in in_file:
-        logging.info('Processing {}'.format(os.path.basename(in_file)))
-        with np.load(in_file, mmap_mode='w+',allow_pickle=True) as S:
-            return dict(S)
-    else:
-        logging.error('Unsupported file type: {}'.format(os.path.splitext(in_file)[-1]))
-        raise IOError
