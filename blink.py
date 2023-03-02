@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import logging
 
-from io import _read_mzml, _read_mgf 
+from msn_io import _read_mzml, _read_mgf 
 from spectral_normalization import _normalize_spectra
 from matrix_manipulation import _build_matrices, _build_matrices_for_network
 from scoring import _score_sparse_matrices, _score_mass_diffs, _stack_dense
