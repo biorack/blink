@@ -1,5 +1,5 @@
 import numpy as np
-from data_binning import _bin_mzs
+from .data_binning import _bin_mzs
 
 def _filter_spectra(mzis):
     """remove zero intensities to keep the sparse arrays from breaking"""

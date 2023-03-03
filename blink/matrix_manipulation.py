@@ -1,6 +1,6 @@
 import numpy as np
 import scipy.sparse as sp
-from data_binning import _calc_pmzdiff_bins, _calc_massdiff_bins, _calc_massdiff_dims, _network_kernel, _shift_bins, _shift_bins_for_network, _calc_max_mz
+from .data_binning import _calc_pmzdiff_bins, _calc_massdiff_bins, _calc_massdiff_dims, _network_kernel, _shift_bins, _shift_bins_for_network, _calc_max_mz
   
 def _construct_sparse_matrices(d_spec, bin_type, max_mz):
     
