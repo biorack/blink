@@ -51,10 +51,10 @@ def _score_sparse_matrices(discretized_spectra):
 def _stack_dense(scores):
     
     depth = scores['massdiff_num'] #number of massdiffs used (in list)
-    rows = len(scores['s1_metadata']['num_ions']) #number of query spectra
-    cols = len(scores['s2_metadata']['num_ions']) #number of reference spectra
+    rows = len(scores['s1_metadata']) #number of query spectra
+    cols = len(scores['s2_metadata']) #number of reference spectra
     
-    mdi_score_stack = np.zeros((depth, rows, cols))
+    mdi_score_stack = np.zeros((depth+1, rows, cols))
     mdc_count_stack = mdi_score_stack.copy()
 
     for dim in range(depth):
@@ -64,7 +64,7 @@ def _stack_dense(scores):
         mdi_score_stack[dim] = scores['mdi'][start_idx:end_idx, :].todense()
         mdc_count_stack[dim] = scores['mdc'][start_idx:end_idx, :].todense()
         
-    score_stack = np.concatenate((scores['nli'].todense(), mdi_score_stack))
-    count_stack = np.concatenate((scores['nlc'].todense(), mdc_count_stack))
+    mdi_score_stack[depth] = scores['nli'].todense()
+    mdc_count_stack[depth] = scores['nlc'].todense()
         
-    return score_stack, count_stack
+    return mdi_score_stack, mdc_count_stack

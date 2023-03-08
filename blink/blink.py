@@ -76,7 +76,14 @@ def discretize_spectra(s1_df:pd.DataFrame, s2_df:pd.DataFrame, tolerance: float=
     if associate_metadata:
         n_mzis_s1['metadata'] = s1_df.drop(columns=['spectrum']).to_dict(orient='records')
         n_mzis_s2['metadata'] = s2_df.drop(columns=['spectrum']).to_dict(orient='records')
+    else:
+        metadata = [{} for ele in range(len(mzis))]
         
+    for i in range(len(mzis_s1)):
+        n_mzis_s1['metadata'][i]['num_ions'] = n_mzis_s1['num_ions'][i]
+    for i in range(len(mzis_s2)):
+        n_mzis_s2['metadata'][i]['num_ions'] = n_mzis_s2['num_ions'][i]
+    
     if network_score:
          discretized_spectra = _build_matrices_for_network(n_mzis_s1, n_mzis_s2, s1_df, s2_df, tolerance, bin_width, mass_diffs)
     else:

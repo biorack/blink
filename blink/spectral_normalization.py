@@ -75,7 +75,7 @@ def _normalize_spectra(mzis, bin_width, intensity_power, trim_empty, remove_dupl
               'mz_bins':mz_bins,
               'normalized_intensities':normalized_intensities,
               'counts':counts,
-              'metadata':{'num_ions':num_ions}}
+              'num_ions':num_ions}
 
     if trim_empty:
         n_spec['blanks'] = _store_empty_ids(spec_ids, kept_idxs)
