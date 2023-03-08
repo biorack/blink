@@ -102,8 +102,8 @@ def compute_max_network_score(scores: dict) -> dict:
     network_scores = np.max(score_stack, axis=0)
     network_counts = np.max(count_stack, axis=0)
 
-    network_scores = {'mzi_mzi':network_scores, 
-                      'mzc_mzc':network_counts}
+    network_scores = {'mzi':network_scores, 
+                      'mzc':network_counts}
     
     return network_scores
 
@@ -116,8 +116,8 @@ def compute_sum_network_score(scores: dict) -> dict:
     network_scores = np.sum(score_stack, axis=0)
     network_counts = np.sum(count_stack, axis=0)
 
-    network_scores = {'mzi_mzi':network_scores, 
-                      'mzc_mzc':network_counts}
+    network_scores = {'mzi':network_scores, 
+                      'mzc':network_counts}
     
     return network_scores
 
@@ -138,32 +138,32 @@ def filter_hits(scores: dict, min_score: float=0.5, min_matches: int=5, override
     scores: dict
         a dictionary of filtered Scipy Sparse COO matrices 
     """
-    idx = scores['mzi_mzi']>=min_score
+    idx = scores['mzi']>=min_score
     if min_matches is not None:
-        idx = idx.multiply(scores['mzc_mzc']>=min_matches)
+        idx = idx.multiply(scores['mzc']>=min_matches)
     if override_matches is not None:
-        idx = idx.maximum(scores['mzc_mzc']>=override_matches)
-    scores['mzi_mzi'] = scores['mzi_mzi'].multiply(idx).tocoo()
-    scores['mzc_mzc'] = scores['mzc_mzc'].multiply(idx).tocoo()
+        idx = idx.maximum(scores['mzc']>=override_matches)
+    scores['mzi'] = scores['mzi'].multiply(idx).tocoo()
+    scores['mzc'] = scores['mzc'].multiply(idx).tocoo()
         
     return scores
 
 def reformat_score_matrix(scores: dict) -> np.ndarray:
     """Reformats the score matrix such that it can be conveniently converted to a pandas DataFrame containing non-zero hits"""
-    if scores['mzi_mzi'].format != 'coo' and scores['mzc_mzc'].format != 'coo':
-        scores['mzi_mzi'] = scores['mzi_mzi'].tocoo()
-        scores['mzc_mzc'] = scores['mzc_mzc'].tocoo()
+    if scores['mzi'].format != 'coo' and scores['mzc'].format != 'coo':
+        scores['mzi'] = scores['mzi'].tocoo()
+        scores['mzc'] = scores['mzc'].tocoo()
     
-    idx = np.ravel_multi_index((scores['mzi_mzi'].row,scores['mzi_mzi'].col),scores['mzi_mzi'].shape)
-    r,c = np.unravel_index(idx,scores['mzi_mzi'].shape)
+    idx = np.ravel_multi_index((scores['mzi'].row,scores['mzi'].col),scores['mzi'].shape)
+    r,c = np.unravel_index(idx,scores['mzi'].shape)
 
     reformed_score_matrix = np.zeros((len(idx),5))#,dtype='>i4')
     reformed_score_matrix[:,0] = idx
     reformed_score_matrix[:,1] = c #query
     reformed_score_matrix[:,2] = r #reference
     idx = np.in1d(idx, idx).nonzero()
-    reformed_score_matrix[idx,3] = scores['mzi_mzi'].data
-    reformed_score_matrix[idx,4] = scores['mzc_mzc'].data
+    reformed_score_matrix[idx,3] = scores['mzi'].data
+    reformed_score_matrix[idx,4] = scores['mzc'].data
 
     #remove self connections
     reformed_score_matrix = reformed_score_matrix[reformed_score_matrix[:,1]!=reformed_score_matrix[:,2]]
