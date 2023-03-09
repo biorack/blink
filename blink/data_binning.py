@@ -22,7 +22,6 @@ def _calc_massdiff_bins(d_spec, mass_diffs, bin_width):
     mass_diffs = mass_diffs + mass_diffs_neg
     mass_diffs_binned = [np.rint(diff/bin_width).astype(int) for diff in mass_diffs]
     massdiff_bins_list = [d_spec['mz_bins'] - binned_diffs for binned_diffs in mass_diffs_binned]
-    massdiff_bins_list.append(d_spec['pmzdiff_bins'])
    
     return massdiff_bins_list
 
