@@ -47,7 +47,7 @@ def _array_spec_ids(mzis):
 
 def _calc_intensity_norm(mzis, intensity_power):
     """returns the intensity vector norm for each spectrum"""
-    inorm = np.array([1./np.linalg.norm(mzi[1]**intensity_power) for mzi in mzis])
+    inorm = np.array([1./np.linalg.norm(mzi[1]**intensity_power, ord=1) for mzi in mzis])
     return inorm
 
 def _normalize_spectra(mzis, bin_width, intensity_power, trim_empty, remove_duplicates):
