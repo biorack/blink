@@ -166,8 +166,8 @@ def reformat_score_matrix(scores: dict) -> np.ndarray:
 
     reformed_score_matrix = np.zeros((len(idx),5))#,dtype='>i4')
     reformed_score_matrix[:,0] = idx
-    reformed_score_matrix[:,1] = c #query
-    reformed_score_matrix[:,2] = r #reference
+    reformed_score_matrix[:,1] = r #query
+    reformed_score_matrix[:,2] = c #reference
     idx = np.in1d(idx, idx).nonzero()
     reformed_score_matrix[idx,3] = scores['mzi'].data
     reformed_score_matrix[idx,4] = scores['mzc'].data
