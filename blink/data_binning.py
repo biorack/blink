@@ -1,5 +1,12 @@
 import numpy as np
 
+def _generate_full_mass_diffs(mass_diffs):
+    
+    mass_diffs_neg = [-diff for diff in mass_diffs if diff > 0]
+    full_diff_list = mass_diffs + mass_diffs_neg
+    
+    return full_diff_list
+
 def _bin_mzs(mzis, bin_width):
     """bins m/z values based on bin width"""
     mz_bins = np.rint(mzis[0]/bin_width).astype(int)

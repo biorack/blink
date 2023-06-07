@@ -1,16 +1,18 @@
 import numpy as np
 import pandas as pd
+import scipy.sparse as sp
 import os
 import logging
 
 from .msn_io import _read_mzml, _read_mgf 
 from .spectral_normalization import _normalize_spectra
-from .matrix_manipulation import _build_matrices, _build_matrices_for_network
-from .scoring import _score_sparse_matrices, _score_mass_diffs, _stack_dense
+from .data_binning import _generate_full_mass_diffs
+from .matrix_manipulation import _build_matrices, _build_matrices_for_network, _flatten_sparse_matrices
+from .scoring import _score_sparse_matrices, _score_mass_diffs
 
-#########################
-# Core Functionality
-#########################
+##########################
+# Core BLINK Functionality
+##########################
 
 def open_msms_file(in_file):
     if '.mgf' in in_file:
@@ -35,49 +37,55 @@ def open_sparse_msms_file(in_file):
 def write_sparse_msms_file(out_file, S):
     np.savez_compressed(out_file, **S)
 
-def discretize_spectra(s1_df:pd.DataFrame, s2_df:pd.DataFrame, tolerance: float=0.01, bin_width: float=0.001, intensity_power: float=0.5, mass_diffs: list=[0], 
-                        network_score: bool=False, associate_metadata: bool=True, trim_empty: bool=False, remove_duplicates: bool=False) -> dict:
+def discretize_spectra(mzis_s1: list, mzis_s2: list, precursor_mzs_s1: list, precursor_mzs_s2: list, metadata_s1: list=None, metadata_s2: list=None, tolerance: float=0.01, 
+                       bin_width: float=0.001, intensity_power: float=0.5, mass_diffs: list=[0], network_score: bool=False, trim_empty: bool=False, remove_duplicates: bool=False) -> dict:
     """Normalizes spectral intensities and constructs sparse matrices to be scored
     
     Parameters
     ----------
-    s1_df: pd.DataFrame
-        The dataframe that contains query spectra and associated metadata
-    s2_df: pd.DataFrame
-        The dataframe that contains reference spectra and associated metadata
-    tolerance : float, optional
+    mzis_s1
+        List of np.ndarray MS2 spectra. Must match metadata row order if associating metadata.
+    mzis_s2
+        List of np.ndarray MS2 spectra. Must match metadata row order if associating metadata.
+    precursor_mzs_s1
+        List of precursor mzs 
+    precursor_mzs_s2
+        List of precursor mzs   
+    metadata_s1: optional
+        List of dictionaries that contain metadata associated with lists of spectra in row order. If None, metadata will only contain ion count.
+    metadata_s2: optional
+        List of dictionaries that contain metadata associated with lists of spectra in row order. If None, metadata will only contain ion count.
+    tolerance: optional
         The maximum differences between m/z values (in daltons) to be considered matching
-    bin_width: float, optional
+    bin_width: optional
         The value (in daltons) used to bin the m/z values. Typically set to the accuracy of MS
-    intensity_power: float, optional
+    intensity_power: optional
         Intensities values are raised to the power of this number
-    mass_diffs: list, optional
+    mass_diffs: optional
         This list of mass differences is used to generate the networking scores
-    network_score: bool, optional
+    network_score: optional
         If True, construct matrices necessary for calculating the network score 
-    associate_metadata: bool, optional
-        If True, associate columns in input dataframes with spectral data
-    trim_empty: bool, optional
+    trim_empty: optional
         If True, remove empty spectra from input data
-    remove_duplicates: bool, optional
+    remove_duplicates: optional
         If True, average m/zs and sum intensities of fragment ion 
-
+    
     Returns
     -------
     discretized_spectra: dict
         a dict of sparse matrices containing spectral data and associated metadata
     """
-    mzis_s1 = s1_df.spectrum.tolist()
-    mzis_s2 = s2_df.spectrum.tolist()
     
     n_mzis_s1 = _normalize_spectra(mzis_s1, bin_width, intensity_power, trim_empty, remove_duplicates)
     n_mzis_s2 = _normalize_spectra(mzis_s2, bin_width, intensity_power, trim_empty, remove_duplicates)
     
-    if associate_metadata:
-        n_mzis_s1['metadata'] = s1_df.drop(columns=['spectrum']).to_dict(orient='records')
-        n_mzis_s2['metadata'] = s2_df.drop(columns=['spectrum']).to_dict(orient='records')
+    if metadata_s1 is not None:
+        n_mzis_s1['metadata'] = metadata_s1
+    if metadata_s2 is not None:
+        n_mzis_s2['metadata'] = metadata_s2
     else:
-        metadata = [{} for ele in range(len(mzis))]
+        n_mzis_s1['metadata'] = [{} for ele in range(len(mzis_s1))]
+        n_mzis_s2['metadata'] = [{} for ele in range(len(mzis_s2))]
         
     for i in range(len(mzis_s1)):
         n_mzis_s1['metadata'][i]['num_ions'] = n_mzis_s1['num_ions'][i]
@@ -85,7 +93,7 @@ def discretize_spectra(s1_df:pd.DataFrame, s2_df:pd.DataFrame, tolerance: float=
         n_mzis_s2['metadata'][i]['num_ions'] = n_mzis_s2['num_ions'][i]
     
     if network_score:
-         discretized_spectra = _build_matrices_for_network(n_mzis_s1, n_mzis_s2, s1_df, s2_df, tolerance, bin_width, mass_diffs)
+         discretized_spectra = _build_matrices_for_network(n_mzis_s1, n_mzis_s2, precursor_mzs_s1, precursor_mzs_s2, tolerance, bin_width, mass_diffs)
     else:
         discretized_spectra = _build_matrices(n_mzis_s1, n_mzis_s2, tolerance, bin_width, mass_diffs)
 
@@ -100,33 +108,6 @@ def score_sparse_spectra(discretized_spectra: dict) -> dict:
         scores = _score_sparse_matrices(discretized_spectra)
         
     return scores
-
-def compute_max_network_score(scores: dict) -> dict:
-    """Computes the maximum scores from dense score stack"""
-
-    score_stack, count_stack = _stack_dense(scores)
-    
-    network_scores = np.max(score_stack, axis=0)
-    network_counts = np.max(count_stack, axis=0)
-
-    network_scores = {'mzi':network_scores, 
-                      'mzc':network_counts}
-    
-    return network_scores
-
-    
-def compute_sum_network_score(scores: dict) -> dict:
-    """Computes the sum of scores from dense score stack"""
-
-    score_stack, count_stack = _stack_dense(scores)
-    
-    network_scores = np.sum(score_stack, axis=0)
-    network_counts = np.sum(count_stack, axis=0)
-
-    network_scores = {'mzi':network_scores, 
-                      'mzc':network_counts}
-    
-    return network_scores
 
 def filter_hits(scores: dict, min_score: float=0.5, min_matches: int=5, override_matches: int=20) -> dict:
     """Filter scores and counts based on minimum scores, minimum matches, and optionally a number of matches that overrides the minimum scores
@@ -145,42 +126,129 @@ def filter_hits(scores: dict, min_score: float=0.5, min_matches: int=5, override
     scores: dict
         a dictionary of filtered Scipy Sparse COO matrices 
     """
-    idx = scores['mzi']>=min_score
+    keep_idx = scores['mzi'].data >= min_score
+    
     if min_matches is not None:
-        idx = idx.multiply(scores['mzc']>=min_matches)
+        keep_idx = keep_idx * (scores['mzc'].data >= min_matches)
+        
     if override_matches is not None:
-        idx = idx.maximum(scores['mzc']>=override_matches)
-    scores['mzi'] = scores['mzi'].multiply(idx).tocoo()
-    scores['mzc'] = scores['mzc'].multiply(idx).tocoo()
+        keep_idx = np.maximum(keep_idx, scores['mzc'].data >= override_matches)
+        
+    scores['mzi'].data[~keep_idx] = 0.0
+    scores['mzc'].data[~keep_idx] = 0.0
+    
+    scores['mzi'].eliminate_zeros()
+    scores['mzc'].eliminate_zeros()
         
     return scores
 
-def reformat_score_matrix(scores: dict) -> np.ndarray:
-    """Reformats the score matrix such that it can be conveniently converted to a pandas DataFrame containing non-zero hits"""
-    if scores['mzi'].format != 'coo' and scores['mzc'].format != 'coo':
-        scores['mzi'] = scores['mzi'].tocoo()
-        scores['mzc'] = scores['mzc'].tocoo()
+
+def reformat_score_matrix(scores: dict, remove_self_connections=False) -> sp.base.spmatrix:
+    """Reformats the score matrix such that it can be conveniently converted to a pandas DataFrame containing non-zero hits
+     
+    Parameters
+    ----------
+    scores
+        A dictionary of sparse score and count matrices
+    remove_self_connections: optional
+        If True, scores and counts between the same spectra will be set to zero. Only enable if scoring identical sets of spectra. 
+
+    Returns
+    ----------
+    nonzero_output_mat
+        A sparse matrix output that contains only nonzero rows. Can be easily converted to a pandas DataFrame.
+    """
+    flat_scores, flat_matches = _flatten_sparse_matrices(scores, scores['mzc'].shape[0], scores['mzc'].shape[1], remove_self_connections)
     
-    idx = np.ravel_multi_index((scores['mzi'].row,scores['mzi'].col),scores['mzi'].shape)
-    r,c = np.unravel_index(idx,scores['mzi'].shape)
+    nonzero_row_idxs, nonzero_col_idxs = flat_matches.nonzero()
+    
+    query, ref = np.unravel_index(nonzero_row_idxs, scores['mzc'].shape)
+    sparse_query = sp.coo_matrix((query, (nonzero_row_idxs, np.zeros(nonzero_row_idxs.shape))), shape=(flat_scores.shape[0], 1), dtype=float, copy=False)
+    sparse_ref = sp.coo_matrix((ref, (nonzero_row_idxs, np.zeros(nonzero_row_idxs.shape))), shape=(flat_scores.shape[0], 1), dtype=float, copy=False)
+    
+    output_mat = sp.hstack([flat_scores, flat_matches, sparse_query, sparse_ref])
+    nonzero_output_mat = output_mat.tocsr()[nonzero_row_idxs, :]
+    
+    return nonzero_output_mat
 
-    reformed_score_matrix = np.zeros((len(idx),5))#,dtype='>i4')
-    reformed_score_matrix[:,0] = idx
-    reformed_score_matrix[:,1] = r #query
-    reformed_score_matrix[:,2] = c #reference
-    idx = np.in1d(idx, idx).nonzero()
-    reformed_score_matrix[idx,3] = scores['mzi'].data
-    reformed_score_matrix[idx,4] = scores['mzc'].data
 
-    #remove self connections
-    reformed_score_matrix = reformed_score_matrix[reformed_score_matrix[:,1]!=reformed_score_matrix[:,2]]
+def make_output_df(nonzero_output_mat):
+    
+    cols = ['score', 'matches', 'query', 'ref']
+    
+    output_df = pd.DataFrame.sparse.from_spmatrix(nonzero_output_mat, columns=cols)
+    
+    return output_df
 
-    return reformed_score_matrix
+#####################
+# REM-BLINK Functions
+#####################
 
-def make_score_df(reformed_score_matrix:dict, discretized_spectra:dict) -> pd.DataFrame:
+def stack_network_matrices(scores: dict, discretized_spectra: dict, mass_diffs: list=[0], remove_self_connections: bool=False, filter_min_score: float=0.2, filter_min_matches: int=3, filter_override_matches: int=5):
+    
+    full_diff_list = _generate_full_mass_diffs(mass_diffs)
+    
+    md_scores = {'mzi':scores['mdi'], 'mzc':scores['mdc']}
+    nl_scores = {'mzi':scores['nli'], 'mzc':scores['nlc']}
+    
+    depth = scores['massdiff_num'] #number of massdiffs used (in list)
+    rows = len(scores['s1_metadata']) #number of query spectra
+    cols = len(scores['s2_metadata']) #number of reference spectra
+    
+    filtered_diff_scores = filter_hits(md_scores, min_score=0.2, min_matches=3, override_matches=5)
+    filtered_nl_scores = filter_hits(nl_scores, min_score=0.2, min_matches=3, override_matches=5)
+    
+    score_list = []
+    matches_list = []
+    
+    for dim in range(depth):
+        start_idx = dim * rows
+        end_idx = start_idx + rows
+    
+        diff_scores = {'mzi':filtered_diff_scores['mzi'][start_idx:end_idx, :], 'mzc':filtered_diff_scores['mzc'][start_idx:end_idx, :]}
+        
+        flat_scores, flat_matches = _flatten_sparse_matrices(diff_scores, rows, cols, remove_self_connections)
+        
+        score_list.append(flat_scores)
+        matches_list.append(flat_matches)
 
-    df = pd.DataFrame(reformed_score_matrix, columns=['raveled_index','query','ref','score','matches'])
-    df = pd.merge(df,pd.DataFrame(discretized_spectra['s1']['metadata']).add_suffix('_query'),left_on='query',right_index=True,how='left')
-    df = pd.merge(df,pd.DataFrame(list(discretized_spectra['s2']['metadata'])).add_suffix('_ref'),left_on='ref',right_index=True,how='left')
+    flat_scores, flat_matches = _flatten_sparse_matrices(filtered_nl_scores, rows, cols, remove_self_connections)
+    
+    score_list.append(flat_scores)
+    matches_list.append(flat_matches)
+    
+    score_stack = sp.hstack(score_list)
+    matches_stack = sp.hstack(matches_list)
+        
+    return score_stack, matches_stack
 
-    return df
+def rem_predict(score_stack, scores, regressor, min_predicted_score=0.045):
+    
+    nonzero_row_idxs, nonzero_col_idxs = score_stack.nonzero()
+    unique_nonzero_rows = np.unique(nonzero_row_idxs)
+    nonzero_score_stack = score_stack.tocsr()[unique_nonzero_rows]
+    
+    predicted_similarity = regressor.predict(nonzero_score_stack)
+    sparse_predicted = sp.coo_matrix((predicted_similarity, (unique_nonzero_rows, np.zeros(unique_nonzero_rows.shape))), shape=(score_stack.shape[0], 1), dtype=float, copy=False)
+    
+    predicted_rows, predicted_cols = (sparse_predicted >= min_predicted_score).nonzero()
+    predicted_query, predicted_ref = np.unravel_index(predicted_rows, scores['nlc'].shape)
+    
+    sparse_predicted_query = sp.coo_matrix((predicted_query, (predicted_rows, np.zeros(predicted_rows.shape))), shape=(sparse_predicted.shape[0], 1), dtype=float, copy=False)
+    sparse_predicted_ref = sp.coo_matrix((predicted_ref, (predicted_rows, np.zeros(predicted_rows.shape))), shape=(sparse_predicted.shape[0], 1), dtype=float, copy=False)
+    
+    full_score_stack = sp.hstack([score_stack, sparse_predicted, sparse_predicted_query, sparse_predicted_ref])
+    
+    return full_score_stack, predicted_rows
+
+def make_rem_df(full_score_stack, matches_stack, predicted_rows, mass_diffs=[0]):
+    
+    full_diff_list = _generate_full_mass_diffs(mass_diffs)
+    
+    score_cols = ["{}_score".format(diff) for diff in full_diff_list] + ["neutral_loss_score", "rem_predicted_score", "query", "ref"]
+    matches_cols = ["{}_matches".format(diff) for diff in full_diff_list] + ["neutral_loss_matches"]
+    
+    score_rem_df = pd.DataFrame.sparse.from_spmatrix(full_score_stack.tocsr()[predicted_rows, :], columns=score_cols)
+    matches_rem_df = pd.DataFrame.sparse.from_spmatrix(matches_stack.tocsr()[predicted_rows, :], columns=matches_cols)
+    
+    return score_rem_df, matches_rem_df

@@ -32,13 +32,13 @@ def _construct_massdiff_sparse_matrices(n_spec, max_mz):
     
     return m_i, m_c
 
-def _build_matrices_for_network(n_mzis_s1, n_mzis_s2, s1_df, s2_df, tolerance, bin_width, mass_diffs):
+def _build_matrices_for_network(n_mzis_s1, n_mzis_s2, precursor_mzs_s1, precursor_mzs_s2, tolerance, bin_width, mass_diffs):
     
-    n_mzis_s1['pmzdiff_bins'] = _calc_pmzdiff_bins(n_mzis_s1, s1_df.precursor_mz, bin_width)
+    n_mzis_s1['pmzdiff_bins'] = _calc_pmzdiff_bins(n_mzis_s1, precursor_mzs_s1, bin_width)
     n_mzis_s1['massdiff_bins_list'] = _calc_massdiff_bins(n_mzis_s1, mass_diffs, bin_width)
     n_mzis_s1['massdiff_dims'] = _calc_massdiff_dims(n_mzis_s1['massdiff_bins_list'])
 
-    n_mzis_s2['pmzdiff_bins'] = _calc_pmzdiff_bins(n_mzis_s2, s2_df.precursor_mz, bin_width)
+    n_mzis_s2['pmzdiff_bins'] = _calc_pmzdiff_bins(n_mzis_s2, precursor_mzs_s2, bin_width)
     _network_kernel(n_mzis_s2, tolerance, bin_width) 
 
     _shift_bins_for_network(n_mzis_s1, n_mzis_s2)
@@ -70,3 +70,14 @@ def _build_matrices(n_mzis_s1, n_mzis_s2, tolerance, bin_width, mass_diffs):
                               's2':{'mzi':s2_mz_m_i, 'mzc':s2_mz_m_c, 'metadata':n_mzis_s2['metadata']}}
     
     return sparse_matrices
+
+def _flatten_sparse_matrices(scores, rows, cols, remove_self_connections):
+    
+    if remove_self_connections:
+        scores['mzi'].setdiag(0, k=0)
+        scores['mzc'].setdiag(0, k=0)
+        
+    flat_scores = scores['mzi'].reshape((rows*cols), 1)
+    flat_matches = scores['mzc'].reshape((rows*cols), 1)
+    
+    return flat_scores, flat_matches
