@@ -52,7 +52,7 @@ def _build_matrices_for_network(n_mzis_s1, n_mzis_s2, precursor_mzs_s1, precurso
 
     network_sparse_matrices = {'s1':{'mdi':s1_massdiff_m_i, 'mdc':s1_massdiff_m_c, 'nli':s1_pmzdiff_m_i, 'nlc':s1_pmzdiff_m_c, 'metadata':n_mzis_s1['metadata']},
                                 's2':{'mzi':s2_mz_m_i, 'mzc':s2_mz_m_c, 'nli':s2_pmzdiff_m_i, 'nlc':s2_pmzdiff_m_c, 'metadata':n_mzis_s2['metadata']},
-                                'massdiff_num':len(n_mzis_s1['massdiff_bins_list'])}
+                                'massdiff_num':len(n_mzis_s1['massdiff_bins_list']), 'mass_diffs': mass_diffs}
     
     return network_sparse_matrices
 

@@ -184,9 +184,9 @@ def make_output_df(nonzero_output_mat):
 # REM-BLINK Functions
 #####################
 
-def stack_network_matrices(scores: dict, discretized_spectra: dict, mass_diffs: list=[0], remove_self_connections: bool=False, filter_min_score: float=0.2, filter_min_matches: int=3, filter_override_matches: int=5):
+def stack_network_matrices(scores: dict, remove_self_connections: bool=False, filter_min_score: float=0.2, filter_min_matches: int=3, filter_override_matches: int=5):
     
-    full_diff_list = _generate_full_mass_diffs(mass_diffs)
+    full_diff_list = _generate_full_mass_diffs(scores['mass_diffs'])
     
     md_scores = {'mzi':scores['mdi'], 'mzc':scores['mdc']}
     nl_scores = {'mzi':scores['nli'], 'mzc':scores['nlc']}
