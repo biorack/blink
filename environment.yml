@@ -16,3 +16,4 @@ dependencies:
   - matchms
   - networkx
   - pymzml
+  - pyteomics
