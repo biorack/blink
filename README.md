@@ -34,36 +34,64 @@ tutorial/blink_tutorial.ipynb
 ## Command-line Usage
 
 ```bash
->> ./blink.py --help
-usage: blink.py [-h] [--trim] [--dedup] [-b B] [-i I] [-t T] [-d [D ...]] [-r R] [-s S] [-m M] [--fast_format] [-f] [-o O] F [F ...]
+>> -m blink.blink_cli --help
+usage: blink_cli.py [-h] -mds MD [MD ...] [-t TOLERANCE] [-b BIN_WIDTH] [-i INTENSITY_POWER] [--trim] [--dedup] [-s MIN_SCORE] [-m MIN_MATCHES] [-o OVERRIDE_MATCHES] [-p MIN_PREDICT] Q R O PM NM P
 
-BLINK discretizes mass spectra (given .mgf inputs), and scores discretized spectra (given .npz inputs)
+REM-BLINK Efficiently Performs Analog Searches Accounting For Multiple Mass Differences
 
 positional arguments:
-  F                     files to process
+  Q                     MGF or mzML files containing experimental spectra
+  R                     MGF or mzML files containing reference spectra
+  O                     path to output file. Output file is a CSV
+  PM                    path to REM-BLINK model trained for positive spectral comparisons
+  NM                    path to REM-BLINK model trained for negative spectral comparisons
+  P                     ion mode of query spectra. Determines the model used. Allowed inputs as "positive" and "negative"
 
 optional arguments:
   -h, --help            show this help message and exit
+  -mds MD [MD ...], --mass_diffs MD [MD ...]
+                        m/z differences used to calculate score vector. Must match those used to train model (including order)
 
+  -t TOLERANCE, --tolerance TOLERANCE
+                        allowed dalton tolerance between matched MS/MS fragment peaks
+  -b BIN_WIDTH, --bin_width BIN_WIDTH
+                        width of bins in m/z. Larger bins will be faster at the expense of precision.
+  -i INTENSITY_POWER, --intensity_power INTENSITY_POWER
+                        exponent used to adjust intensities prior to scoring
   --trim                remove empty spectra when discretizing
   --dedup               deduplicate fragment ions within 2 times bin_width
-  -b B, --bin_width B   width of bins in mz
-  -i I, --intensity_power I
-                        power to raise intensites to in when scoring
 
-  -t T, --tolerance T   maximum tolerance in mz for fragment ions to match
-  -d [D ...], --mass_diffs [D ...]
-                        mass diffs to network
-  -r R, --react_steps R
-                        recursively combine mass_diffs within number of reaction steps
-  -s S, --min_score S   minimum score to include in output
-  -m M, --min_matches M
-                        minimum matches to include in output
+  -s MIN_SCORE, --min_score MIN_SCORE
+                        minimum cosine score to include in output. This should be lower than is typical since further filtering occurs after REM prediction.
+  -m MIN_MATCHES, --min_matches MIN_MATCHES
+                        minimum matches to include in output. This should be lower than is typical since further filtering occurs after REM prediction.
+  -o OVERRIDE_MATCHES, --override_matches OVERRIDE_MATCHES
+                        number of matches to keep comparison regardless of score
+  -p MIN_PREDICT, --min_predict MIN_PREDICT
+                        minimum REM-BLINK predicted score to include in output.
+```
 
-  --fast_format         use fast .npz format to store scores instead of .tab
-  -f, --force           force file(s) to be remade if they exist
-  -o O, --out_dir O     change output location for output file(s)
+## Command-line Example
 
+```bash
+/global/common/software/m2650/python3-matchms/bin/python -m blink.blink_cli \
+ ~/repos/blink/example/accuracy_test_data/small.mgf \
+ ~/repos/blink/example/accuracy_test_data/medium.mgf \
+ ~/Downloads/blink2out.csv \
+ /global/u2/b/bpb/repos/blink/models/positive_random_forest.pickle \
+ /global/u2/b/bpb/repos/blink/models/negative_random_forest.pickle \
+ positive \
+ --min_predict 0.01 \
+--mass_diffs 0 14.0157 12.000 15.9949 2.01565 27.9949 26.0157 18.0106 30.0106 42.0106 1.9792 17.00284 24.000 13.97925 1.00794 40.0313
+```
+
+## Pre-trained Models
+Random forest regression models were trained using MS/MS spectra randomly sampled from a dereplicated union of GNPS, NIST17, and NIST20 spectral libraries.
+For prediction to work correctly, the list of mass differences used to score spectra must be the same as the training list.
+
+Training Lists:
+positive_random_forest: 0 14.0157 12.000 15.9949 2.01565 27.9949 26.0157 18.0106 30.0106 42.0106 1.9792 17.00284 24.000 13.97925 1.00794 40.0313
+negative_random_forest: 0 14.0157 12.000 15.9949 2.01565 27.9949 26.0157 18.0106 30.0106 42.0106 1.9792 17.00284 24.000 13.97925 1.00794 40.0313
 
 # Discretize fragmentation mass spectra to sparse matrix format (.npz)
 # small = 1e2 spectra, medium = 1e4 spectra
@@ -79,7 +107,7 @@ small.tab
 # Compute A-vs-B cosine scores and # matching ions for each fragmentation mass spectrum
 >> blink.py ./example/small.npz ./example/medium.npz
 small_medium.tab
-```
+
 
 ## Contributing
 Pull requests are welcome.

@@ -13,10 +13,10 @@ def create_rem_parser():
 
     parser.add_argument('query_file', action='store', type=file_path, metavar='Q', help='MGF or mzML files containing experimental spectra')
     parser.add_argument('reference_file', action='store', type=file_path, metavar='R', help='MGF or mzML files containing reference spectra')
-    parser.add_argument('output_file', action='store', type=str, metavar='O', help='path to output file')
+    parser.add_argument('output_file', action='store', type=str, metavar='O', help='path to output file. Output file is a CSV')
     parser.add_argument('pos_model_path', action='store', type=file_path, metavar='PM', help='path to REM-BLINK model trained for positive spectral comparisons')
     parser.add_argument('neg_model_path', action='store', type=file_path, metavar='NM', help='path to REM-BLINK model trained for negative spectral comparisons')
-    parser.add_argument('polarity', action='store', type=str, metavar='P', choices=['positive', 'negative'], help='ion mode of query spectra. Determines the model used.')
+    parser.add_argument('polarity', action='store', type=str, metavar='P', choices=['positive', 'negative'], help='ion mode of query spectra. Determines the model used. Allowed inputs as "positive" and "negative"')
     parser.add_argument('-mds', '--mass_diffs', nargs='+', type=float, required=True, action='store', metavar='MD', help='m/z differences used to calculate score vector. Must match those used to train model')
 
     #Discretize options
