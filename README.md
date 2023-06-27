@@ -30,13 +30,13 @@ conda env create -f environment.yml
 
 ```
 Please see for descriptions and usage of primary functions and all optional parameters 
-tutorial/blink_tutorial.ipynb
+tutorial/blink_tutorial.ipynb (WIP)
 ```
 
 ## Command-line Usage
 
 ```
->> -m blink.blink_cli --help
+>>python3 -m blink.blink_cli --help
 usage: blink_cli.py [-h] -mds MD [MD ...] [-t TOLERANCE] [-b BIN_WIDTH] [-i INTENSITY_POWER] [--trim] [--dedup] [-s MIN_SCORE] [-m MIN_MATCHES] [-o OVERRIDE_MATCHES] [-p MIN_PREDICT] Q R O PM NM P
 
 REM-BLINK Efficiently Performs Analog Searches Accounting For Multiple Mass Differences
