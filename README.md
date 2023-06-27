@@ -35,7 +35,7 @@ tutorial/blink_tutorial.ipynb
 
 ## Command-line Usage
 
-```bash
+```
 >> -m blink.blink_cli --help
 usage: blink_cli.py [-h] -mds MD [MD ...] [-t TOLERANCE] [-b BIN_WIDTH] [-i INTENSITY_POWER] [--trim] [--dedup] [-s MIN_SCORE] [-m MIN_MATCHES] [-o OVERRIDE_MATCHES] [-p MIN_PREDICT] Q R O PM NM P
 
@@ -71,6 +71,7 @@ optional arguments:
                         number of matches to keep comparison regardless of score
   -p MIN_PREDICT, --min_predict MIN_PREDICT
                         minimum REM-BLINK predicted score to include in output.
+ --include_matches     include matching fragment ion counts in the output file.
 ```
 
 ## Command-line Example

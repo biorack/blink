@@ -47,5 +47,7 @@ def create_rem_parser():
                                 help='number of matches to keep comparison regardless of score')
     filter_options.add_argument('-p', '--min_predict', type=float, default=0.005, required=False,
                                 help='minimum REM-BLINK predicted score to include in output.')
+    filter_options.add_argument('--include_matches', action='store_true', default=False, required=False,
+                                help='include matching fragment ion counts in the output file.')
 
     return parser

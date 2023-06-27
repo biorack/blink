@@ -288,4 +288,9 @@ def main():
     rem_scores, predicted_rows = rem_predict(stacked_scores, scores, regressor, min_predicted_score=args.min_predict)
     score_rem_df, matches_rem_df = make_rem_df(rem_scores, stacked_counts, predicted_rows, mass_diffs=args.mass_diffs)
 
-    score_rem_df.to_csv(args.output_file)
+    if args.include_matches:
+        output = pd.merge(matches_rem_df, score_rem_df, left_index=True, right_index=True)
+    else:
+        output = score_rem_df
+
+    output.to_csv(args.output_file)
