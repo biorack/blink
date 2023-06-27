@@ -90,24 +90,8 @@ Random forest regression models were trained using MS/MS spectra randomly sample
 For prediction to work correctly, the list of mass differences used to score spectra must be the same as the training list.
 
 Training Lists:
-positive_random_forest: 0 14.0157 12.000 15.9949 2.01565 27.9949 26.0157 18.0106 30.0106 42.0106 1.9792 17.00284 24.000 13.97925 1.00794 40.0313
+positive_random_forest: 0 14.0157 12.000 15.9949 2.01565 27.9949 26.0157 18.0106 30.0106 42.0106 1.9792 17.00284 24.000 13.97925 1.00794 40.0313 \
 negative_random_forest: 0 14.0157 12.000 15.9949 2.01565 27.9949 26.0157 18.0106 30.0106 42.0106 1.9792 17.00284 24.000 13.97925 1.00794 40.0313
-
-# Discretize fragmentation mass spectra to sparse matrix format (.npz)
-# small = 1e2 spectra, medium = 1e4 spectra
->> blink.py ./example/small.mgf
-small.npz
->> blink.py ./example/medium.mgf
-medium.npz
-
-# Compute all-by-all cosine scores and # matching ions for each fragmentation mass spectrum
->> blink.py ./example/small.npz
-small.tab
-
-# Compute A-vs-B cosine scores and # matching ions for each fragmentation mass spectrum
->> blink.py ./example/small.npz ./example/medium.npz
-small_medium.tab
-
 
 ## Contributing
 Pull requests are welcome.
