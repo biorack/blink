@@ -94,8 +94,8 @@ optional arguments:
 Random forest regression models were trained using MS/MS spectra randomly sampled from a dereplicated union of GNPS, NIST17, and NIST20 spectral libraries.
 For prediction to work correctly, the list of mass differences used to score spectra must be the same as the training list.
 
-Training Lists: \
-positive_random_forest: 0 14.0157 12.000 15.9949 2.01565 27.9949 26.0157 18.0106 30.0106 42.0106 1.9792 17.00284 24.000 13.97925 1.00794 40.0313 \
+Training Lists: 
+positive_random_forest: 0 14.0157 12.000 15.9949 2.01565 27.9949 26.0157 18.0106 30.0106 42.0106 1.9792 17.00284 24.000 13.97925 1.00794 40.0313 
 negative_random_forest: 0 14.0157 12.000 15.9949 2.01565 27.9949 26.0157 18.0106 30.0106 42.0106 1.9792 17.00284 24.000 13.97925 1.00794 40.0313
 ```
 
