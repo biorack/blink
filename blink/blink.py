@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 import os
+import pickle
 import logging
 
 from .msn_io import _read_mzml, _read_mgf 
@@ -9,6 +10,7 @@ from .spectral_normalization import _normalize_spectra
 from .data_binning import _generate_full_mass_diffs
 from .matrix_manipulation import _build_matrices, _build_matrices_for_network, _flatten_sparse_matrices
 from .scoring import _score_sparse_matrices, _score_mass_diffs
+from .arg_parser import create_rem_parser
 
 ##########################
 # Core BLINK Functionality
@@ -160,7 +162,7 @@ def reformat_score_matrix(scores: dict, remove_self_connections=False) -> sp.bas
     """
     flat_scores, flat_matches = _flatten_sparse_matrices(scores, scores['mzc'].shape[0], scores['mzc'].shape[1], remove_self_connections)
     
-    nonzero_row_idxs, nonzero_col_idxs = flat_matches.nonzero()
+    nonzero_row_idxs = flat_matches.nonzero()[0]
     
     query, ref = np.unravel_index(nonzero_row_idxs, scores['mzc'].shape)
     sparse_query = sp.coo_matrix((query, (nonzero_row_idxs, np.zeros(nonzero_row_idxs.shape))), shape=(flat_scores.shape[0], 1), dtype=float, copy=False)
@@ -186,8 +188,6 @@ def make_output_df(nonzero_output_mat):
 
 def stack_network_matrices(scores: dict, remove_self_connections: bool=False, filter_min_score: float=0.2, filter_min_matches: int=3, filter_override_matches: int=5):
     
-    full_diff_list = _generate_full_mass_diffs(scores['mass_diffs'])
-    
     md_scores = {'mzi':scores['mdi'], 'mzc':scores['mdc']}
     nl_scores = {'mzi':scores['nli'], 'mzc':scores['nlc']}
     
@@ -195,8 +195,8 @@ def stack_network_matrices(scores: dict, remove_self_connections: bool=False, fi
     rows = len(scores['s1_metadata']) #number of query spectra
     cols = len(scores['s2_metadata']) #number of reference spectra
     
-    filtered_diff_scores = filter_hits(md_scores, min_score=0.2, min_matches=3, override_matches=5)
-    filtered_nl_scores = filter_hits(nl_scores, min_score=0.2, min_matches=3, override_matches=5)
+    filtered_diff_scores = filter_hits(md_scores, min_score=filter_min_score, min_matches=filter_min_matches, override_matches=filter_override_matches)
+    filtered_nl_scores = filter_hits(nl_scores, min_score=filter_min_score, min_matches=filter_min_matches, override_matches=filter_override_matches)
     
     score_list = []
     matches_list = []
@@ -222,16 +222,16 @@ def stack_network_matrices(scores: dict, remove_self_connections: bool=False, fi
         
     return score_stack, matches_stack
 
-def rem_predict(score_stack, scores, regressor, min_predicted_score=0.045):
+def rem_predict(score_stack, scores, regressor, min_predicted_score=0.005):
     
-    nonzero_row_idxs, nonzero_col_idxs = score_stack.nonzero()
+    nonzero_row_idxs = score_stack.nonzero()[0]
     unique_nonzero_rows = np.unique(nonzero_row_idxs)
     nonzero_score_stack = score_stack.tocsr()[unique_nonzero_rows]
     
     predicted_similarity = regressor.predict(nonzero_score_stack)
     sparse_predicted = sp.coo_matrix((predicted_similarity, (unique_nonzero_rows, np.zeros(unique_nonzero_rows.shape))), shape=(score_stack.shape[0], 1), dtype=float, copy=False)
     
-    predicted_rows, predicted_cols = (sparse_predicted >= min_predicted_score).nonzero()
+    predicted_rows = (sparse_predicted >= min_predicted_score).nonzero()[0]
     predicted_query, predicted_ref = np.unravel_index(predicted_rows, scores['nlc'].shape)
     
     sparse_predicted_query = sp.coo_matrix((predicted_query, (predicted_rows, np.zeros(predicted_rows.shape))), shape=(sparse_predicted.shape[0], 1), dtype=float, copy=False)
@@ -252,3 +252,40 @@ def make_rem_df(full_score_stack, matches_stack, predicted_rows, mass_diffs=[0])
     matches_rem_df = pd.DataFrame.sparse.from_spmatrix(matches_stack.tocsr()[predicted_rows, :], columns=matches_cols)
     
     return score_rem_df, matches_rem_df
+
+#####################
+# REM-BLINK Argparser
+#####################
+
+def main():
+    parser = create_rem_parser()
+    args = parser.parse_args()
+
+    if args.polarity == 'positive':
+        with open(args.pos_model_path, 'rb') as out:
+            regressor = pickle.load(out)
+    else:
+        with open(args.neg_model_path, 'rb') as out:
+            regressor = pickle.load(out)
+
+    query_df = open_msms_file(args.query_file)
+    reference_df = open_msms_file(args.reference_file)
+
+    query_spectra = query_df.spectrum.tolist()
+    reference_spectra = reference_df.spectrum.tolist()
+
+    query_pmzs = query_df.precursor_mz.tolist()
+    reference_pmzs = reference_df.precursor_mz.tolist()
+
+    discretized_spectra = discretize_spectra(query_spectra, reference_spectra, query_pmzs, reference_pmzs, network_score=True, 
+                                             tolerance=args.tolerance, bin_width=args.bin_width, intensity_power=args.intensity_power,
+                                             trim_empty=args.trim, remove_duplicates=args.dedup, mass_diffs=args.mass_diffs)
+    
+    scores = score_sparse_spectra(discretized_spectra)
+    stacked_scores, stacked_counts = stack_network_matrices(scores, filter_min_score=args.min_score, 
+                                                            filter_min_matches=args.min_matches, filter_override_matches=args.override_matches)
+    
+    rem_scores, predicted_rows = rem_predict(stacked_scores, scores, regressor, min_predicted_score=args.min_predict)
+    score_rem_df, matches_rem_df = make_rem_df(rem_scores, stacked_counts, predicted_rows, mass_diffs=args.mass_diffs)
+
+    score_rem_df.to_csv(args.output_file)
