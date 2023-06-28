@@ -1,9 +1,11 @@
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+import sys
 import os
 import pickle
 import logging
+from timeit import default_timer as timer
 
 from .msn_io import _read_mzml, _read_mgf 
 from .spectral_normalization import _normalize_spectra
@@ -261,6 +263,8 @@ def main():
     parser = create_rem_parser()
     args = parser.parse_args()
 
+    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+
     if args.polarity == 'positive':
         with open(args.pos_model_path, 'rb') as out:
             regressor = pickle.load(out)
@@ -268,8 +272,12 @@ def main():
         with open(args.neg_model_path, 'rb') as out:
             regressor = pickle.load(out)
 
+    start = timer()
     query_df = open_msms_file(args.query_file)
     reference_df = open_msms_file(args.reference_file)
+    end = timer()
+
+    logging.info('Input files read time: {} seconds, {} spectra'.format(end-start, query_df.shape[0]+reference_df.shape[0]))
 
     query_spectra = query_df.spectrum.tolist()
     reference_spectra = reference_df.spectrum.tolist()
@@ -277,16 +285,28 @@ def main():
     query_pmzs = query_df.precursor_mz.tolist()
     reference_pmzs = reference_df.precursor_mz.tolist()
 
+    start = timer()
     discretized_spectra = discretize_spectra(query_spectra, reference_spectra, query_pmzs, reference_pmzs, network_score=True, 
                                              tolerance=args.tolerance, bin_width=args.bin_width, intensity_power=args.intensity_power,
                                              trim_empty=args.trim, remove_duplicates=args.dedup, mass_diffs=args.mass_diffs)
+    end = timer()
     
+    logging.info('Discretization time: {} seconds, {} spectra'.format(end-start, len(query_spectra)+len(reference_spectra)))
+    
+    start = timer()
     scores = score_sparse_spectra(discretized_spectra)
     stacked_scores, stacked_counts = stack_network_matrices(scores, filter_min_score=args.min_score, 
                                                             filter_min_matches=args.min_matches, filter_override_matches=args.override_matches)
+    end = timer()
+
+    logging.info('Scoring time: {} seconds, {} spectra'.format(end-start, len(query_spectra)+len(reference_spectra)))
     
+    start = timer()
     rem_scores, predicted_rows = rem_predict(stacked_scores, scores, regressor, min_predicted_score=args.min_predict)
     score_rem_df, matches_rem_df = make_rem_df(rem_scores, stacked_counts, predicted_rows, mass_diffs=args.mass_diffs)
+    end = timer()
+
+    logging.info('Prediction time: {} seconds, {} spectra'.format(end-start, len(query_spectra)+len(reference_spectra)))
 
     if args.include_matches:
         output = pd.merge(matches_rem_df, score_rem_df, left_index=True, right_index=True)
@@ -320,4 +340,8 @@ def main():
         output = pd.merge(output, reference_df['spectrumid'], left_on='ref', right_index=True)
         output.rename(columns={'spectrumid':'ref_spectrumid'}, inplace=True)
 
+    start = timer()
     output.to_csv(args.output_file)
+    end = timer()
+
+    logging.info('Output write time: {} seconds, {} rows'.format(end-start, output.shape[0]))
