@@ -299,14 +299,15 @@ def main():
                                                             filter_min_matches=args.min_matches, filter_override_matches=args.override_matches)
     end = timer()
 
-    logging.info('Scoring time: {} seconds, {} spectra'.format(end-start, len(query_spectra)+len(reference_spectra)))
+    logging.info('Scoring time: {} seconds, {} comparisons'.format(end-start, len(query_spectra)*len(reference_spectra)))
     
     start = timer()
     rem_scores, predicted_rows = rem_predict(stacked_scores, scores, regressor, min_predicted_score=args.min_predict)
-    score_rem_df, matches_rem_df = make_rem_df(rem_scores, stacked_counts, predicted_rows, mass_diffs=args.mass_diffs)
     end = timer()
 
-    logging.info('Prediction time: {} seconds, {} spectra'.format(end-start, len(query_spectra)+len(reference_spectra)))
+    logging.info('Prediction time: {} seconds, {} comparisons'.format(end-start, len(query_spectra)*len(reference_spectra)))
+
+    score_rem_df, matches_rem_df = make_rem_df(rem_scores, stacked_counts, predicted_rows, mass_diffs=args.mass_diffs)
 
     if args.include_matches:
         output = pd.merge(matches_rem_df, score_rem_df, left_index=True, right_index=True)
