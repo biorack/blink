@@ -319,27 +319,19 @@ def main():
 
     if 'id' in query_df.columns:
         output = pd.merge(output, query_df['id'], left_on='query', right_index=True)
-        output.rename(columns={'id':'query_scan_num'}, inplace=True)
-
-    elif 'scans' in query_df.columns:
-        output = pd.merge(output, query_df['scans'], left_on='query', right_index=True)
-        output.rename(columns={'scans':'query_scan_num'}, inplace=True)
+        output.rename(columns={'id':'query_id'}, inplace=True)
         
     if 'spectrumid' in query_df.columns:
         output = pd.merge(output, query_df['spectrumid'], left_on='query', right_index=True)   
-        output.rename(columns={'spectrumid':'query_spectrumid'}, inplace=True)
+        output.rename(columns={'spectrumid':'query_id'}, inplace=True)
         
     if 'id' in reference_df.columns:
         output = pd.merge(output, reference_df['id'], left_on='ref', right_index=True)
-        output.rename(columns={'id':'ref_scan_num'}, inplace=True)
-        
-    elif 'scans' in reference_df.columns:
-        output = pd.merge(output, reference_df['scans'], left_on='ref', right_index=True)
-        output.rename(columns={'scans':'ref_scan_num'}, inplace=True)
+        output.rename(columns={'id':'ref_id'}, inplace=True)
         
     if 'spectrumid' in reference_df.columns:
         output = pd.merge(output, reference_df['spectrumid'], left_on='ref', right_index=True)
-        output.rename(columns={'spectrumid':'ref_spectrumid'}, inplace=True)
+        output.rename(columns={'spectrumid':'ref_id'}, inplace=True)
 
     start = timer()
     output.to_csv(args.output_file)
