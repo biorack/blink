@@ -314,8 +314,8 @@ def main():
     else:
         output = score_rem_df
 
-    output['query_filename'] = args.query_file
-    output['ref_filename'] = args.reference_file
+    output['query_filename'] = os.path.basename(args.query_file)
+    output['ref_filename'] = os.path.basename(args.reference_file)
 
     if 'id' in query_df.columns:
         output = pd.merge(output, query_df['id'], left_on='query', right_index=True)
