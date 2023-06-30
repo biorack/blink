@@ -265,17 +265,24 @@ def main():
 
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
-    if args.polarity == 'positive':
-        with open(args.pos_model_path, 'rb') as out:
-            regressor = pickle.load(out)
-    else:
-        with open(args.neg_model_path, 'rb') as out:
-            regressor = pickle.load(out)
-
     start = timer()
     query_df = open_msms_file(args.query_file)
     reference_df = open_msms_file(args.reference_file)
     end = timer()
+
+    if args.polarity == 'positive':
+        with open(args.pos_model_path, 'rb') as out:
+            regressor = pickle.load(out)
+        
+        if 'ionmode' in reference_df.columns:
+            reference_df = reference_df[reference_df['ionmode'].str.lower() != 'negative']
+
+    else:
+        with open(args.neg_model_path, 'rb') as out:
+            regressor = pickle.load(out)
+
+        if 'ionmode' in reference_df.columns:
+            reference_df = reference_df[reference_df['ionmode'].str.lower() != 'positive']
 
     logging.info('Input files read time: {} seconds, {} spectra'.format(end-start, query_df.shape[0]+reference_df.shape[0]))
 
