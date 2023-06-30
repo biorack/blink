@@ -321,24 +321,49 @@ def main():
     else:
         output = score_rem_df
 
+    output = output.astype({'query':int, 'ref':int})
+
     output['query_filename'] = os.path.basename(args.query_file)
     output['ref_filename'] = os.path.basename(args.reference_file)
 
+    output = pd.merge(output, query_df['precursor_mz'], left_on='query', right_index=True)
+    output = pd.merge(output, query_df['charge'], left_on='query', right_index=True)
+    output.rename(columns={'precursor_mz':'query_precursor_mz', 'charge':'query_charge'}, inplace=True)
+
+    output = pd.merge(output, reference_df['precursor_mz'], left_on='ref', right_index=True)
+    output = pd.merge(output, reference_df['charge'], left_on='ref', right_index=True)
+    output.rename(columns={'precursor_mz':'ref_precursor_mz', 'charge':'ref_charge'}, inplace=True)
+
+    #mzML Query
     if 'id' in query_df.columns:
         output = pd.merge(output, query_df['id'], left_on='query', right_index=True)
-        output.rename(columns={'id':'query_id'}, inplace=True)
-        
-    if 'spectrumid' in query_df.columns:
+        output = pd.merge(output, (query_df['rt'] * 60), left_on='query', right_index=True)
+        output.rename(columns={'id':'query_id', 'rt':'query_rt'}, inplace=True)
+
+    #FBMN MGF Query
+    elif 'scans' in query_df.columns:
+        output = pd.merge(output, query_df['scans'], left_on='query', right_index=True)
+        output = pd.merge(output, query_df['rtinseconds'], left_on='query', right_index=True)
+        output.rename(columns={'scans':'query_id', 'rtinseconds':'query_rt'}, inplace=True)
+    
+    #Lib MGF Query
+    elif 'spectrumid' in query_df.columns:
         output = pd.merge(output, query_df['spectrumid'], left_on='query', right_index=True)   
+        output['query_rt'] = 0
         output.rename(columns={'spectrumid':'query_id'}, inplace=True)
-        
+
+    #mzML Ref
     if 'id' in reference_df.columns:
         output = pd.merge(output, reference_df['id'], left_on='ref', right_index=True)
         output.rename(columns={'id':'ref_id'}, inplace=True)
         
-    if 'spectrumid' in reference_df.columns:
+    #Lib MGF Ref
+    elif 'spectrumid' in reference_df.columns:
         output = pd.merge(output, reference_df['spectrumid'], left_on='ref', right_index=True)
         output.rename(columns={'spectrumid':'ref_id'}, inplace=True)
+
+    output['mz_diff'] = abs(output['query_precursor_mz'] - output['ref_precursor_mz'])
+    output['mz_ppm_error'] = output['mz_diff'] / output['ref_precursor_mz'] * 1000000
 
     start = timer()
     output.to_csv(args.output_file)
