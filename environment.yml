@@ -1,4 +1,4 @@
-name: blink-example
+name: blink
 channels:
   - rdkit
   - bioconda
@@ -8,6 +8,8 @@ dependencies:
   - numpy
   - pandas
   - scipy
+  - scikit-learn=1.0.2
+  - torch
   - seaborn
   - jupyter
   - matplotlib
@@ -15,3 +17,4 @@ dependencies:
   - matchms
   - networkx
   - pymzml
+  - pyteomics
