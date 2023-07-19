@@ -33,7 +33,11 @@ def open_sparse_msms_file(in_file):
     if '.npz' in in_file:
         logging.info('Processing {}'.format(os.path.basename(in_file)))
         with np.load(in_file, mmap_mode='w+',allow_pickle=True) as S:
-            return dict(S)
+            s_load = {}
+            s_load['s1'] = dict(S)['s1'][()]
+            s_load['s2'] = dict(S)['s1'][()]
+            return s_load
+            
     else:
         logging.error('Unsupported file type: {}'.format(os.path.splitext(in_file)[-1]))
         raise IOError
