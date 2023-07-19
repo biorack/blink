@@ -33,7 +33,7 @@ Please see for descriptions and usage of primary functions and all optional para
 tutorial/blink_tutorial.ipynb (WIP)
 ```
 
-## Command-line Usage
+## Command-line Usage (Experimental)
 
 ```
 >>python3 -m blink.blink_cli --help
