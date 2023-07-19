@@ -19,6 +19,7 @@ conda env create -f environment.yml
 - python3
 - numpy
 - scipy
+- torch
 - scikit-learn
 - pandas
 - matplotlib
@@ -33,7 +34,7 @@ Please see for descriptions and usage of primary functions and all optional para
 tutorial/blink_tutorial.ipynb (WIP)
 ```
 
-## Command-line Usage
+## Command-line Usage (Experimental)
 
 ```
 >>python3 -m blink.blink_cli --help
@@ -74,7 +75,7 @@ optional arguments:
   --include_matches     include matching fragment ion counts in the output file.
 ```
 
-## Command-line Example
+## Command-line Example (Experimental)
 
 ```bash
 /global/common/software/m2650/python3-matchms/bin/python -m blink.blink_cli \
@@ -88,7 +89,7 @@ optional arguments:
 --mass_diffs 0 14.0157 12.000 15.9949 2.01565 27.9949 26.0157 18.0106 30.0106 42.0106 1.9792 17.00284 24.000 13.97925 1.00794 40.0313
 ```
 
-## Pre-trained Models
+## Pre-trained Models (Experimental)
 
 ```
 Random forest regression models were trained using MS/MS spectra randomly sampled from a dereplicated union of GNPS, NIST17, and NIST20 spectral libraries.
