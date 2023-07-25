@@ -9,7 +9,6 @@ dependencies:
   - pandas
   - scipy
   - scikit-learn=1.0.2
-  - torch
   - seaborn
   - jupyter
   - matplotlib
@@ -18,3 +17,6 @@ dependencies:
   - networkx
   - pymzml
   - pyteomics
+  - pip:
+      - torch
+
